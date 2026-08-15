@@ -4,6 +4,7 @@
 // and returns a score (higher is better for that player)
 
 use log::trace;
+use serde::{Deserialize, Serialize};
 
 use crate::card_logic::get_highest_evolutions;
 use crate::hooks::energy_missing;
@@ -12,7 +13,7 @@ use crate::state::GameOutcome;
 use crate::State;
 
 /// Coefficients for the parametric value function
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct ValueFunctionParams {
     pub points: f64,
     pub pokemon_value: f64,
@@ -67,6 +68,99 @@ impl ValueFunctionParams {
             opponent_discard_size: 0.1,
         }
     }
+
+    /// Field order used by `to_vec` / `from_vec`. Kept explicit (rather than derived) because
+    /// external optimizers index into this vector positionally; reordering it silently
+    /// invalidates every params file already on disk.
+    pub const FIELD_NAMES: [&'static str; 13] = [
+        "points",
+        "pokemon_value",
+        "hand_size",
+        "deck_size",
+        "active_retreat_cost",
+        "active_pokemon_online_score",
+        "active_safety",
+        "active_has_tool",
+        "is_winner",
+        "turns_until_opponent_wins",
+        "online_pokemon_count",
+        "energy_distance_to_online",
+        "opponent_discard_size",
+    ];
+
+    /// Load coefficients from a JSON file. This is the seam that lets an external optimizer
+    /// (CMA-ES, grid search, anything) treat the simulator as a black-box fitness function
+    /// without any FFI.
+    pub fn from_file(path: &str) -> Result<Self, String> {
+        let contents = std::fs::read_to_string(path)
+            .map_err(|err| format!("Failed to read params file {path}: {err}"))?;
+        serde_json::from_str(&contents)
+            .map_err(|err| format!("Failed to parse params file {path}: {err}"))
+    }
+
+    pub fn to_file(&self, path: &str) -> Result<(), String> {
+        let json = serde_json::to_string_pretty(self)
+            .map_err(|err| format!("Failed to serialize params: {err}"))?;
+        std::fs::write(path, json).map_err(|err| format!("Failed to write {path}: {err}"))
+    }
+
+    /// Flatten to a coefficient vector, in `FIELD_NAMES` order.
+    pub fn to_vec(&self) -> Vec<f64> {
+        vec![
+            self.points,
+            self.pokemon_value,
+            self.hand_size,
+            self.deck_size,
+            self.active_retreat_cost,
+            self.active_pokemon_online_score,
+            self.active_safety,
+            self.active_has_tool,
+            self.is_winner,
+            self.turns_until_opponent_wins,
+            self.online_pokemon_count,
+            self.energy_distance_to_online,
+            self.opponent_discard_size,
+        ]
+    }
+
+    /// Rebuild from a coefficient vector in `FIELD_NAMES` order.
+    pub fn from_vec(values: &[f64]) -> Result<Self, String> {
+        if values.len() != Self::FIELD_NAMES.len() {
+            return Err(format!(
+                "Expected {} coefficients, got {}",
+                Self::FIELD_NAMES.len(),
+                values.len()
+            ));
+        }
+        Ok(Self {
+            points: values[0],
+            pokemon_value: values[1],
+            hand_size: values[2],
+            deck_size: values[3],
+            active_retreat_cost: values[4],
+            active_pokemon_online_score: values[5],
+            active_safety: values[6],
+            active_has_tool: values[7],
+            is_winner: values[8],
+            turns_until_opponent_wins: values[9],
+            online_pokemon_count: values[10],
+            energy_distance_to_online: values[11],
+            opponent_discard_size: values[12],
+        })
+    }
+}
+
+impl Default for ValueFunctionParams {
+    fn default() -> Self {
+        Self::baseline()
+    }
+}
+
+/// Build a `ValueFunction` closure that evaluates states with the given coefficients.
+pub fn params_value_function(params: ValueFunctionParams) -> crate::players::ValueFunction {
+    Box::new(move |state: &State, myself: usize| {
+        parametric_value_function(state, myself, &params)
+    })
 }
 
 pub fn baseline_value_function(state: &State, myself: usize) -> f64 {
