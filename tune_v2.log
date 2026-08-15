@@ -1,0 +1,38 @@
+nohup: ignoring input
+/home/uahawke/deckgym-core/.venv/lib/python3.13/site-packages/cma/s.py:16: UserWarning: Could not import matplotlib.pyplot, therefore ``cma.plot()`` etc. is not available
+  _warnings.warn('Could not import matplotlib.pyplot, therefore'
+Optimizing 12 of 13 coefficients (frozen: ['is_winner'])
+Baseline fitness: 0.8025 (win rate 0.799, 21 ties / 360 games)
+gen   1/25  best=0.8238  incumbent=0.8238  (1.6 min) *saved*
+gen   2/25  best=0.8214  incumbent=0.8238  (3.2 min)
+gen   3/25  best=0.8320  incumbent=0.8320  (4.8 min) *saved*
+gen   4/25  best=0.8350  incumbent=0.8350  (6.4 min) *saved*
+gen   5/25  best=0.8297  incumbent=0.8350  (8.0 min)
+  [seed rotated to 1001; incumbent re-scored at 0.8250]
+gen   6/25  best=0.8366  incumbent=0.8366  (9.8 min) *saved*
+gen   7/25  best=0.8402  incumbent=0.8402  (11.5 min) *saved*
+gen   8/25  best=0.8446  incumbent=0.8446  (13.2 min) *saved*
+gen   9/25  best=0.8519  incumbent=0.8519  (14.8 min) *saved*
+gen  10/25  best=0.8490  incumbent=0.8519  (16.9 min)
+  [seed rotated to 2001; incumbent re-scored at 0.8345]
+gen  11/25  best=0.8461  incumbent=0.8461  (19.5 min) *saved*
+gen  12/25  best=0.8390  incumbent=0.8461  (21.9 min)
+gen  13/25  best=0.8424  incumbent=0.8461  (24.3 min)
+gen  14/25  best=0.8431  incumbent=0.8461  (26.6 min)
+gen  15/25  best=0.8420  incumbent=0.8461  (28.9 min)
+  [seed rotated to 3001; incumbent re-scored at 0.8138]
+gen  16/25  best=0.8322  incumbent=0.8322  (31.4 min) *saved*
+gen  17/25  best=0.8368  incumbent=0.8368  (33.7 min) *saved*
+gen  18/25  best=0.8256  incumbent=0.8368  (36.0 min)
+gen  19/25  best=0.8311  incumbent=0.8368  (38.3 min)
+gen  20/25  best=0.8394  incumbent=0.8394  (40.7 min) *saved*
+  [seed rotated to 4001; incumbent re-scored at 0.7883]
+gen  21/25  best=0.8464  incumbent=0.8464  (43.0 min) *saved*
+gen  22/25  best=0.8456  incumbent=0.8464  (45.3 min)
+gen  23/25  best=0.8418  incumbent=0.8464  (47.4 min)
+gen  24/25  best=0.8516  incumbent=0.8516  (49.6 min) *saved*
+gen  25/25  best=0.8613  incumbent=0.8613  (51.8 min) *saved*
+
+Best fitness 0.8613 written to tuned_params_v2.json
+Validate on unseen seeds and more decks before trusting it, e.g.:
+  cargo run --release --bin eval_bot -- --candidate e1 --params tuned_params_v2.json --opponents r,w --games 200 --max-decks 8 --seed 999999

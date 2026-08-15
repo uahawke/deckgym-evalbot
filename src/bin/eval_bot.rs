@@ -375,10 +375,12 @@ fn main() {
             total_losses,
             total_ties
         );
-        if report.beats_coinflip {
-            println!("Interval excludes 50% -- candidate is stronger than the gauntlet.");
+        if low > 0.5 {
+            println!("Interval is entirely ABOVE 50% -- candidate is significantly stronger.");
+        } else if high < 0.5 {
+            println!("Interval is entirely BELOW 50% -- candidate is significantly WEAKER.");
         } else {
-            println!("Interval includes 50% -- NOT a statistically distinguishable improvement.");
+            println!("Interval straddles 50% -- no statistically distinguishable difference.");
         }
     }
 

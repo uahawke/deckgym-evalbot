@@ -104,6 +104,7 @@ def evaluate(params, args, seed):
         "--opponents", args.opponents,
         "--games", str(args.games),
         "--max-decks", str(args.decks),
+        "--decks-folder", args.decks_folder,
         "--seed", str(seed),
         "--json", report_path,
         "--fitness-only",
@@ -138,6 +139,8 @@ def main():
     p.add_argument("--sigma", type=float, default=0.5)
     p.add_argument("--games", type=int, default=50, help="games per (deck, opponent, seat) cell")
     p.add_argument("--decks", type=int, default=4)
+    p.add_argument("--decks-folder", default="example_decks",
+                   help="folder of decklists to tune against")
     p.add_argument("--candidate", default="e1", help="e1 = one-ply value-function player; only e<n> candidates actually consume --params")
     p.add_argument("--opponents", default="w", help="avoid 'v' -- self-play makes fitness drift")
     p.add_argument("--seed", type=int, default=1)
