@@ -176,6 +176,18 @@ fn main() {
         ValueFunctionParams::from_file(path).unwrap_or_else(|err| panic!("{err}"))
     });
 
+    // ValueFunctionPlayer and the heuristic bots have hardcoded evaluations; only
+    // ExpectiMiniMax consumes ValueFunctionParams. Silently ignoring --params made an entire
+    // tuning run return identical fitness for every candidate, so refuse it outright.
+    if params.is_some() && !matches!(candidate_code, PlayerCode::E { .. }) {
+        panic!(
+            "--params only affects ExpectiMiniMax candidates (e<depth>); '{}' has a hardcoded \
+             value function and would ignore the coefficients. Use --candidate e1 for a \
+             one-ply value-function player.",
+            args.candidate
+        );
+    }
+
     let mut decks = list_decks(&args.decks_folder);
     assert!(!decks.is_empty(), "No .txt decks found in {}", args.decks_folder);
     if args.max_decks > 0 && decks.len() > args.max_decks {
