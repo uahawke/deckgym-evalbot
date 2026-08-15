@@ -46,6 +46,12 @@ struct Args {
     #[arg(long, default_value = "r,w,v")]
     opponents: String,
 
+    /// Optional JSON params for the OPPONENT side. Enables head-to-head comparisons between
+    /// two coefficient sets (e.g. tuned vs baseline), which is the only measurement with full
+    /// dynamic range once the candidate is already beating the weak bots ~90% of the time.
+    #[arg(long)]
+    opponent_params: Option<String>,
+
     /// Games per (deck, opponent, side) cell. Total games = games * decks * opponents * 2.
     #[arg(long, default_value_t = 100)]
     games: u32,
@@ -88,6 +94,7 @@ struct CellResult {
 struct EvalReport {
     candidate: String,
     params_file: Option<String>,
+    opponent_params_file: Option<String>,
     total_games: u32,
     candidate_wins: u32,
     opponent_wins: u32,
@@ -175,6 +182,20 @@ fn main() {
     let params = args.params.as_ref().map(|path| {
         ValueFunctionParams::from_file(path).unwrap_or_else(|err| panic!("{err}"))
     });
+    let opponent_params = args.opponent_params.as_ref().map(|path| {
+        ValueFunctionParams::from_file(path).unwrap_or_else(|err| panic!("{err}"))
+    });
+    if opponent_params.is_some()
+        && !opponent_codes
+            .iter()
+            .all(|c| matches!(c, PlayerCode::E { .. }))
+    {
+        panic!(
+            "--opponent-params only affects ExpectiMiniMax opponents (e<depth>); at least one \
+             of '{}' has a hardcoded value function and would ignore the coefficients.",
+            args.opponents
+        );
+    }
 
     // ValueFunctionPlayer and the heuristic bots have hardcoded evaluations; only
     // ExpectiMiniMax consumes ValueFunctionParams. Silently ignoring --params made an entire
@@ -227,16 +248,17 @@ fn main() {
                 let cand_code = candidate_code.clone();
                 let opp_code = opponent_code.clone();
                 let cand_params = params;
+                let opp_params = opponent_params;
 
                 let factory = move |deck_a: Deck, deck_b: Deck| -> Vec<Box<dyn Player>> {
                     if candidate_seat == 0 {
                         vec![
                             build_player(deck_a, &cand_code, cand_params),
-                            build_player(deck_b, &opp_code, None),
+                            build_player(deck_b, &opp_code, opp_params),
                         ]
                     } else {
                         vec![
-                            build_player(deck_a, &opp_code, None),
+                            build_player(deck_a, &opp_code, opp_params),
                             build_player(deck_b, &cand_code, cand_params),
                         ]
                     }
@@ -315,6 +337,7 @@ fn main() {
     let report = EvalReport {
         candidate: args.candidate.clone(),
         params_file: args.params.clone(),
+        opponent_params_file: args.opponent_params.clone(),
         total_games,
         candidate_wins: total_wins,
         opponent_wins: total_losses,
