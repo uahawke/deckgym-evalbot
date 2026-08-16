@@ -18,14 +18,37 @@ on:
       opponent_params:
         description: 'Reference opponent params file'
         default: 'tuned_params_v5.json'
-      seed:
-        description: 'Base RNG seed'
+      seed_rotation:
+        description: 'Rotate seeds every N generations (0 disables)'
+        default: '5'
+      tie_penalty:
+        description: 'Fitness penalty per tie (turn-30 timeouts)'
+        default: '0.25'
+      seeds:
+        description: 'Comma-separated base seeds; each runs as a parallel replicate'
         default: '1'
 
 jobs:
+  # One replicate per seed. Independent runs make it possible to tell a real gain
+  # from seed luck: if only one replicate beats the reference, it was noise.
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      seeds: ${{ steps.split.outputs.seeds }}
+    steps:
+      - id: split
+        run: |
+          JSON=$(echo '${{ inputs.seeds }}' | tr -d ' ' | jq -R 'split(",")' -c)
+          echo "seeds=$JSON" >> "$GITHUB_OUTPUT"
+
   tune:
+    needs: prepare
     runs-on: ubuntu-latest
     timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: ${{ fromJSON(needs.prepare.outputs.seeds) }}
     steps:
       - uses: actions/checkout@v4
 
@@ -51,7 +74,9 @@ jobs:
             --decks-folder decks/train \
             --opponents e1 \
             --opponent-params ${{ inputs.opponent_params }} \
-            --seed ${{ inputs.seed }} \
+            --seed ${{ matrix.seed }} \
+            --seed-rotation ${{ inputs.seed_rotation }} \
+            --tie-penalty ${{ inputs.tie_penalty }} \
             --out tuned_params_ci.json 2>&1 | tee tune.log
 
       - name: Validate on held-out decks
@@ -64,7 +89,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: tuning-results
+          name: tuning-results-seed${{ matrix.seed }}
           path: |
             tuned_params_ci.json
             tune.log
