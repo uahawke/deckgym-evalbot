@@ -247,6 +247,13 @@ impl Card {
         }
     }
 
+    pub(crate) fn get_weakness(&self) -> Option<EnergyType> {
+        match self {
+            Card::Pokemon(pokemon_card) => pokemon_card.weakness,
+            _ => None,
+        }
+    }
+
     pub fn get_card_id(&self) -> CardId {
         CardId::from_card_id(self.get_id().as_str()).expect("Card ID should be valid")
     }

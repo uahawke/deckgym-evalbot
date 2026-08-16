@@ -28,6 +28,18 @@ pub struct ValueFunctionParams {
     pub online_pokemon_count: f64,
     pub energy_distance_to_online: f64,
     pub opponent_discard_size: f64,
+    /// Weakness matchup: +1 when the opponent's active is Weak to my active's type, -1 when
+    /// mine is Weak to theirs. Weakness is +20 damage in Pocket and frequently decides whether
+    /// an attack knocks out; nothing in the original 13 features represented it at all.
+    #[serde(default)]
+    pub active_weakness_matchup: f64,
+    /// 1.0 when my active can knock out the opponent's active right now with an attack I can
+    /// currently pay for.
+    #[serde(default)]
+    pub can_ko_opponent_active: f64,
+    /// 1.0 when the opponent's active can knock out my active right now.
+    #[serde(default)]
+    pub opponent_can_ko_my_active: f64,
 }
 
 impl ValueFunctionParams {
@@ -47,6 +59,9 @@ impl ValueFunctionParams {
             online_pokemon_count: 0.0,
             energy_distance_to_online: 0.0,
             opponent_discard_size: 0.1,
+            active_weakness_matchup: 0.0,
+            can_ko_opponent_active: 0.0,
+            opponent_can_ko_my_active: 0.0,
         }
     }
 
@@ -66,13 +81,16 @@ impl ValueFunctionParams {
             online_pokemon_count: 0.0,
             energy_distance_to_online: 0.0,
             opponent_discard_size: 0.1,
+            active_weakness_matchup: 0.0,
+            can_ko_opponent_active: 0.0,
+            opponent_can_ko_my_active: 0.0,
         }
     }
 
     /// Field order used by `to_vec` / `from_vec`. Kept explicit (rather than derived) because
     /// external optimizers index into this vector positionally; reordering it silently
     /// invalidates every params file already on disk.
-    pub const FIELD_NAMES: [&'static str; 13] = [
+    pub const FIELD_NAMES: [&'static str; 16] = [
         "points",
         "pokemon_value",
         "hand_size",
@@ -86,6 +104,9 @@ impl ValueFunctionParams {
         "online_pokemon_count",
         "energy_distance_to_online",
         "opponent_discard_size",
+        "active_weakness_matchup",
+        "can_ko_opponent_active",
+        "opponent_can_ko_my_active",
     ];
 
     /// Load coefficients from a JSON file. This is the seam that lets an external optimizer
@@ -120,6 +141,9 @@ impl ValueFunctionParams {
             self.online_pokemon_count,
             self.energy_distance_to_online,
             self.opponent_discard_size,
+            self.active_weakness_matchup,
+            self.can_ko_opponent_active,
+            self.opponent_can_ko_my_active,
         ]
     }
 
@@ -146,6 +170,9 @@ impl ValueFunctionParams {
             online_pokemon_count: values[10],
             energy_distance_to_online: values[11],
             opponent_discard_size: values[12],
+            active_weakness_matchup: values[13],
+            can_ko_opponent_active: values[14],
+            opponent_can_ko_my_active: values[15],
         })
     }
 }
@@ -198,7 +225,12 @@ pub fn parametric_value_function(
         + (my.online_pokemon_count - opp.online_pokemon_count) * params.online_pokemon_count
         + (my.energy_distance_to_online - opp.energy_distance_to_online)
             * params.energy_distance_to_online
-        + opp.discard_size * params.opponent_discard_size;
+        + opp.discard_size * params.opponent_discard_size
+        // These three are computed from `myself`'s perspective and already carry their own sign,
+        // so unlike the features above they are used directly rather than differenced.
+        + active_weakness_matchup(state, myself) * params.active_weakness_matchup
+        + can_ko_active(state, myself) * params.can_ko_opponent_active
+        + can_ko_active(state, opponent) * params.opponent_can_ko_my_active;
     trace!("parametric_value_function: {score} (params: {params:?}, my: {my:?}, opp: {opp:?})");
     score
 }
@@ -464,4 +496,68 @@ fn calculate_active_pokemon_online_score(state: &State, player: usize) -> f64 {
 
     // Return ratio (0.0 to 1.0)
     (have / total_needed).clamp(0.0, 1.0)
+}
+
+/// Weakness matchup from `player`'s perspective: +1 if the opponent's active is Weak to my
+/// active's type, -1 if mine is Weak to theirs, 0 otherwise (they cancel when both apply).
+fn active_weakness_matchup(state: &State, player: usize) -> f64 {
+    let opponent = (player + 1) % 2;
+    let (Some(mine), Some(theirs)) = (
+        state.maybe_get_active(player),
+        state.maybe_get_active(opponent),
+    ) else {
+        return 0.0;
+    };
+
+    let mut score = 0.0;
+    if let (Some(my_type), Some(their_weakness)) =
+        (mine.card.get_type(), theirs.card.get_weakness())
+    {
+        if my_type == their_weakness {
+            score += 1.0;
+        }
+    }
+    if let (Some(their_type), Some(my_weakness)) =
+        (theirs.card.get_type(), mine.card.get_weakness())
+    {
+        if their_type == my_weakness {
+            score -= 1.0;
+        }
+    }
+    score
+}
+
+/// 1.0 when `player`'s active can knock out the opponent's active this turn using an attack it
+/// can currently pay for, 0.0 otherwise.
+///
+/// Deliberately uses raw `fixed_damage` plus the flat Weakness bonus rather than the full
+/// `modify_damage` hook chain: that hook needs a concrete attack action and target reference,
+/// and calling it at every search leaf would be far too slow. This is an approximation -- it
+/// ignores Giovanni-style buffs, damage-reducing Tools, and conditional attack effects -- but
+/// it captures the common case.
+fn can_ko_active(state: &State, player: usize) -> f64 {
+    let opponent = (player + 1) % 2;
+    let (Some(attacker), Some(defender)) = (
+        state.maybe_get_active(player),
+        state.maybe_get_active(opponent),
+    ) else {
+        return 0.0;
+    };
+
+    let weakness_bonus = match (attacker.card.get_type(), defender.card.get_weakness()) {
+        (Some(attack_type), Some(weakness)) if attack_type == weakness => 20,
+        _ => 0,
+    };
+    let target_hp = defender.get_remaining_hp();
+
+    let can_ko = attacker.card.get_attacks().iter().any(|attack| {
+        if attack.fixed_damage == 0 {
+            return false;
+        }
+        let affordable =
+            energy_missing(attacker, &attack.energy_required, state, player).is_empty();
+        affordable && attack.fixed_damage + weakness_bonus >= target_hp
+    });
+
+    if can_ko { 1.0 } else { 0.0 }
 }

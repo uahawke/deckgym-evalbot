@@ -54,6 +54,9 @@ FIELD_NAMES = [
     "online_pokemon_count",
     "energy_distance_to_online",
     "opponent_discard_size",
+    "active_weakness_matchup",
+    "can_ko_opponent_active",
+    "opponent_can_ko_my_active",
 ]
 
 BASELINE = {
@@ -70,6 +73,11 @@ BASELINE = {
     "online_pokemon_count": 0.0,
     "energy_distance_to_online": 0.0,
     "opponent_discard_size": 0.1,
+    # New features start disabled so the baseline is identical to the old one and any gain is
+    # attributable to the features rather than a shifted starting point.
+    "active_weakness_matchup": 0.0,
+    "can_ko_opponent_active": 0.0,
+    "opponent_can_ko_my_active": 0.0,
 }
 
 # Step scale per dimension. For zero-valued baselines there is no magnitude to infer, so we
@@ -78,6 +86,10 @@ BASELINE = {
 SCALES = {name: (abs(v) if v != 0.0 else 1.0) for name, v in BASELINE.items()}
 SCALES["online_pokemon_count"] = 50.0
 SCALES["energy_distance_to_online"] = 50.0
+# 0/+-1 indicators: the coefficient is directly "how much board value is this worth".
+SCALES["active_weakness_matchup"] = 200.0
+SCALES["can_ko_opponent_active"] = 500.0
+SCALES["opponent_can_ko_my_active"] = 500.0
 
 FROZEN = {"is_winner"}
 
@@ -106,6 +118,9 @@ def evaluate(params, args, seed):
         "--max-decks", str(args.decks),
         "--decks-folder", args.decks_folder,
         "--seed", str(seed),
+    ] + ([] if not args.opponent_params else [
+        "--opponent-params", args.opponent_params,
+    ]) + [
         "--json", report_path,
         "--fitness-only",
     ]
@@ -142,7 +157,11 @@ def main():
     p.add_argument("--decks-folder", default="example_decks",
                    help="folder of decklists to tune against")
     p.add_argument("--candidate", default="e1", help="e1 = one-ply value-function player; only e<n> candidates actually consume --params")
-    p.add_argument("--opponents", default="w", help="avoid 'v' -- self-play makes fitness drift")
+    p.add_argument("--opponents", default="w", help="use 'e1' for head-to-head tuning")
+    p.add_argument("--opponent-params", default=None,
+                   help="JSON params for the opponent. With --opponents e1 this makes fitness a "
+                        "direct head-to-head win rate against a fixed reference bot, which has "
+                        "full dynamic range instead of saturating near 90% vs weak bots.")
     p.add_argument("--seed", type=int, default=1)
     p.add_argument("--seed-rotation", type=int, default=5, help="0 disables rotation")
     p.add_argument("--tie-penalty", type=float, default=0.25)

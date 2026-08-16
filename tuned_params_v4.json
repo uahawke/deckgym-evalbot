@@ -1,0 +1,18 @@
+{
+  "points": 21521.282773992527,
+  "pokemon_value": 1.8605844138335612,
+  "hand_size": -3.0188252178788,
+  "deck_size": 4.240125582681502,
+  "active_retreat_cost": 2.836278101184409,
+  "active_pokemon_online_score": 1393.044646573463,
+  "active_safety": 0.6310788833716807,
+  "active_has_tool": -6.289140144249817,
+  "is_winner": 100000.0,
+  "turns_until_opponent_wins": 53.77025023212162,
+  "online_pokemon_count": -43.65301556056173,
+  "energy_distance_to_online": 134.48126442629683,
+  "opponent_discard_size": 0.2149077509941453,
+  "active_weakness_matchup": 131.93384094982972,
+  "can_ko_opponent_active": 331.71370645382757,
+  "opponent_can_ko_my_active": -2038.8672203432368
+}
