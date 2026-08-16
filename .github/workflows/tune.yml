@@ -1,0 +1,72 @@
+name: Tune value function
+
+on:
+  workflow_dispatch:
+    inputs:
+      generations:
+        description: 'CMA-ES generations'
+        default: '3'
+      popsize:
+        description: 'Population size'
+        default: '4'
+      games:
+        description: 'Games per cell'
+        default: '20'
+      decks:
+        description: 'Number of training decks'
+        default: '3'
+      opponent_params:
+        description: 'Reference opponent params file'
+        default: 'tuned_params_v5.json'
+      seed:
+        description: 'Base RNG seed'
+        default: '1'
+
+jobs:
+  tune:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Python deps
+        run: pip install cma numpy
+
+      - name: Build eval_bot
+        run: cargo build --release --bin eval_bot
+
+      - name: Run tuner
+        run: |
+          python -u python/tune_value_function.py \
+            --generations ${{ inputs.generations }} \
+            --popsize ${{ inputs.popsize }} \
+            --games ${{ inputs.games }} \
+            --decks ${{ inputs.decks }} \
+            --decks-folder decks/train \
+            --opponents e1 \
+            --opponent-params ${{ inputs.opponent_params }} \
+            --seed ${{ inputs.seed }} \
+            --out tuned_params_ci.json 2>&1 | tee tune.log
+
+      - name: Validate on held-out decks
+        run: |
+          cargo run --release --bin eval_bot -- \
+            --candidate e1 --params tuned_params_ci.json \
+            --opponents e1 --opponent-params ${{ inputs.opponent_params }} \
+            --games 150 --max-decks 10 --seed 999999 \
+            --json validation.json | tee validation.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tuning-results
+          path: |
+            tuned_params_ci.json
+            tune.log
+            validation.json
+            validation.txt
