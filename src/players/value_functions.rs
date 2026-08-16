@@ -4,6 +4,7 @@
 // and returns a score (higher is better for that player)
 
 use log::trace;
+use serde::{Deserialize, Serialize};
 
 use crate::card_logic::get_highest_evolutions;
 use crate::hooks::energy_missing;
@@ -12,7 +13,7 @@ use crate::state::GameOutcome;
 use crate::State;
 
 /// Coefficients for the parametric value function
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct ValueFunctionParams {
     pub points: f64,
     pub pokemon_value: f64,
@@ -27,6 +28,18 @@ pub struct ValueFunctionParams {
     pub online_pokemon_count: f64,
     pub energy_distance_to_online: f64,
     pub opponent_discard_size: f64,
+    /// Weakness matchup: +1 when the opponent's active is Weak to my active's type, -1 when
+    /// mine is Weak to theirs. Weakness is +20 damage in Pocket and frequently decides whether
+    /// an attack knocks out; nothing in the original 13 features represented it at all.
+    #[serde(default)]
+    pub active_weakness_matchup: f64,
+    /// 1.0 when my active can knock out the opponent's active right now with an attack I can
+    /// currently pay for.
+    #[serde(default)]
+    pub can_ko_opponent_active: f64,
+    /// 1.0 when the opponent's active can knock out my active right now.
+    #[serde(default)]
+    pub opponent_can_ko_my_active: f64,
 }
 
 impl ValueFunctionParams {
@@ -46,6 +59,9 @@ impl ValueFunctionParams {
             online_pokemon_count: 0.0,
             energy_distance_to_online: 0.0,
             opponent_discard_size: 0.1,
+            active_weakness_matchup: 0.0,
+            can_ko_opponent_active: 0.0,
+            opponent_can_ko_my_active: 0.0,
         }
     }
 
@@ -65,8 +81,113 @@ impl ValueFunctionParams {
             online_pokemon_count: 0.0,
             energy_distance_to_online: 0.0,
             opponent_discard_size: 0.1,
+            active_weakness_matchup: 0.0,
+            can_ko_opponent_active: 0.0,
+            opponent_can_ko_my_active: 0.0,
         }
     }
+
+    /// Field order used by `to_vec` / `from_vec`. Kept explicit (rather than derived) because
+    /// external optimizers index into this vector positionally; reordering it silently
+    /// invalidates every params file already on disk.
+    pub const FIELD_NAMES: [&'static str; 16] = [
+        "points",
+        "pokemon_value",
+        "hand_size",
+        "deck_size",
+        "active_retreat_cost",
+        "active_pokemon_online_score",
+        "active_safety",
+        "active_has_tool",
+        "is_winner",
+        "turns_until_opponent_wins",
+        "online_pokemon_count",
+        "energy_distance_to_online",
+        "opponent_discard_size",
+        "active_weakness_matchup",
+        "can_ko_opponent_active",
+        "opponent_can_ko_my_active",
+    ];
+
+    /// Load coefficients from a JSON file. This is the seam that lets an external optimizer
+    /// (CMA-ES, grid search, anything) treat the simulator as a black-box fitness function
+    /// without any FFI.
+    pub fn from_file(path: &str) -> Result<Self, String> {
+        let contents = std::fs::read_to_string(path)
+            .map_err(|err| format!("Failed to read params file {path}: {err}"))?;
+        serde_json::from_str(&contents)
+            .map_err(|err| format!("Failed to parse params file {path}: {err}"))
+    }
+
+    pub fn to_file(&self, path: &str) -> Result<(), String> {
+        let json = serde_json::to_string_pretty(self)
+            .map_err(|err| format!("Failed to serialize params: {err}"))?;
+        std::fs::write(path, json).map_err(|err| format!("Failed to write {path}: {err}"))
+    }
+
+    /// Flatten to a coefficient vector, in `FIELD_NAMES` order.
+    pub fn to_vec(&self) -> Vec<f64> {
+        vec![
+            self.points,
+            self.pokemon_value,
+            self.hand_size,
+            self.deck_size,
+            self.active_retreat_cost,
+            self.active_pokemon_online_score,
+            self.active_safety,
+            self.active_has_tool,
+            self.is_winner,
+            self.turns_until_opponent_wins,
+            self.online_pokemon_count,
+            self.energy_distance_to_online,
+            self.opponent_discard_size,
+            self.active_weakness_matchup,
+            self.can_ko_opponent_active,
+            self.opponent_can_ko_my_active,
+        ]
+    }
+
+    /// Rebuild from a coefficient vector in `FIELD_NAMES` order.
+    pub fn from_vec(values: &[f64]) -> Result<Self, String> {
+        if values.len() != Self::FIELD_NAMES.len() {
+            return Err(format!(
+                "Expected {} coefficients, got {}",
+                Self::FIELD_NAMES.len(),
+                values.len()
+            ));
+        }
+        Ok(Self {
+            points: values[0],
+            pokemon_value: values[1],
+            hand_size: values[2],
+            deck_size: values[3],
+            active_retreat_cost: values[4],
+            active_pokemon_online_score: values[5],
+            active_safety: values[6],
+            active_has_tool: values[7],
+            is_winner: values[8],
+            turns_until_opponent_wins: values[9],
+            online_pokemon_count: values[10],
+            energy_distance_to_online: values[11],
+            opponent_discard_size: values[12],
+            active_weakness_matchup: values[13],
+            can_ko_opponent_active: values[14],
+            opponent_can_ko_my_active: values[15],
+        })
+    }
+}
+
+impl Default for ValueFunctionParams {
+    fn default() -> Self {
+        Self::baseline()
+    }
+}
+
+/// Build a `ValueFunction` closure that evaluates states with the given coefficients.
+pub fn params_value_function(params: ValueFunctionParams) -> crate::players::ValueFunction {
+    Box::new(move |state: &State, myself: usize| {
+        parametric_value_function(state, myself, &params)
+    })
 }
 
 pub fn baseline_value_function(state: &State, myself: usize) -> f64 {
@@ -104,7 +225,12 @@ pub fn parametric_value_function(
         + (my.online_pokemon_count - opp.online_pokemon_count) * params.online_pokemon_count
         + (my.energy_distance_to_online - opp.energy_distance_to_online)
             * params.energy_distance_to_online
-        + opp.discard_size * params.opponent_discard_size;
+        + opp.discard_size * params.opponent_discard_size
+        // These three are computed from `myself`'s perspective and already carry their own sign,
+        // so unlike the features above they are used directly rather than differenced.
+        + active_weakness_matchup(state, myself) * params.active_weakness_matchup
+        + can_ko_active(state, myself) * params.can_ko_opponent_active
+        + can_ko_active(state, opponent) * params.opponent_can_ko_my_active;
     trace!("parametric_value_function: {score} (params: {params:?}, my: {my:?}, opp: {opp:?})");
     score
 }
@@ -370,4 +496,68 @@ fn calculate_active_pokemon_online_score(state: &State, player: usize) -> f64 {
 
     // Return ratio (0.0 to 1.0)
     (have / total_needed).clamp(0.0, 1.0)
+}
+
+/// Weakness matchup from `player`'s perspective: +1 if the opponent's active is Weak to my
+/// active's type, -1 if mine is Weak to theirs, 0 otherwise (they cancel when both apply).
+fn active_weakness_matchup(state: &State, player: usize) -> f64 {
+    let opponent = (player + 1) % 2;
+    let (Some(mine), Some(theirs)) = (
+        state.maybe_get_active(player),
+        state.maybe_get_active(opponent),
+    ) else {
+        return 0.0;
+    };
+
+    let mut score = 0.0;
+    if let (Some(my_type), Some(their_weakness)) =
+        (mine.card.get_type(), theirs.card.get_weakness())
+    {
+        if my_type == their_weakness {
+            score += 1.0;
+        }
+    }
+    if let (Some(their_type), Some(my_weakness)) =
+        (theirs.card.get_type(), mine.card.get_weakness())
+    {
+        if their_type == my_weakness {
+            score -= 1.0;
+        }
+    }
+    score
+}
+
+/// 1.0 when `player`'s active can knock out the opponent's active this turn using an attack it
+/// can currently pay for, 0.0 otherwise.
+///
+/// Deliberately uses raw `fixed_damage` plus the flat Weakness bonus rather than the full
+/// `modify_damage` hook chain: that hook needs a concrete attack action and target reference,
+/// and calling it at every search leaf would be far too slow. This is an approximation -- it
+/// ignores Giovanni-style buffs, damage-reducing Tools, and conditional attack effects -- but
+/// it captures the common case.
+fn can_ko_active(state: &State, player: usize) -> f64 {
+    let opponent = (player + 1) % 2;
+    let (Some(attacker), Some(defender)) = (
+        state.maybe_get_active(player),
+        state.maybe_get_active(opponent),
+    ) else {
+        return 0.0;
+    };
+
+    let weakness_bonus = match (attacker.card.get_type(), defender.card.get_weakness()) {
+        (Some(attack_type), Some(weakness)) if attack_type == weakness => 20,
+        _ => 0,
+    };
+    let target_hp = defender.get_remaining_hp();
+
+    let can_ko = attacker.card.get_attacks().iter().any(|attack| {
+        if attack.fixed_damage == 0 {
+            return false;
+        }
+        let affordable =
+            energy_missing(attacker, &attack.energy_required, state, player).is_empty();
+        affordable && attack.fixed_damage + weakness_bonus >= target_hp
+    });
+
+    if can_ko { 1.0 } else { 0.0 }
 }
