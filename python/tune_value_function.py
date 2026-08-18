@@ -23,15 +23,24 @@ Design notes:
 * **Seed rotation.** Holding seeds fixed makes comparisons paired (much less noise) but invites
   overfitting to specific shuffles. We rotate every --seed-rotation generations and validate the
   final result on seeds never used during the search.
+
+* **Deck rotation.** eval_bot's --max-decks truncates its --decks-folder listing to a fixed
+  alphabetical prefix, so a fixed --decks count sampled the *same* subset every generation --
+  CMA-ES could memorize answers to a fixed deck quiz instead of generalizing. Every generation we
+  symlink a fresh random --decks-sized sample from --decks-folder into a scratch dir and point
+  eval_bot at that instead, so the full pool gets sampled over the course of a run.
 """
 
 import argparse
 import json
 import os
+import random
+import shutil
 import subprocess
 import sys
 import tempfile
 import time
+from pathlib import Path
 
 import numpy as np
 
@@ -81,9 +90,15 @@ BASELINE = {
     "active_weakness_matchup": 0.0,
     "can_ko_opponent_active": 0.0,
     "opponent_can_ko_my_active": 0.0,
-    "playable_hand_size": 0.0,
+    # playable_hand_size and bench_evolution_potential are pinned here (not 0.0) and frozen
+    # below: four independent runs on 2026-08-18 (one local smoke test, three parallel CI seed
+    # replicates) agreed on sign for both -- playable_hand_size positive (+8 to +25),
+    # bench_evolution_potential negative (-41 to -369) -- so we fix them near their observed
+    # average and let CMA-ES spend its budget on the dimensions that are still unsettled
+    # (evolution_readiness flipped sign between runs and is NOT frozen).
+    "playable_hand_size": 17.0,
     "evolution_readiness": 0.0,
-    "bench_evolution_potential": 0.0,
+    "bench_evolution_potential": -174.0,
 }
 
 # Step scale per dimension. For zero-valued baselines there is no magnitude to infer, so we
@@ -103,7 +118,7 @@ SCALES["playable_hand_size"] = 10.0
 SCALES["evolution_readiness"] = 300.0
 SCALES["bench_evolution_potential"] = 100.0
 
-FROZEN = {"is_winner"}
+FROZEN = {"is_winner", "playable_hand_size", "bench_evolution_potential"}
 
 
 def z_to_params(z, free_names):
@@ -114,7 +129,26 @@ def z_to_params(z, free_names):
     return params
 
 
-def evaluate(params, args, seed):
+def rotate_deck_folder(decks_folder, decks_per_eval, rng, previous=None):
+    """Symlink a fresh random sample of decks_per_eval decklists from decks_folder into a new
+    scratch dir, and remove the previous one. Every eval this generation shares the sample (fair
+    comparison across the population); the next generation draws a new one."""
+    if previous is not None:
+        shutil.rmtree(previous, ignore_errors=True)
+
+    pool = sorted(Path(decks_folder).glob("*.txt"))
+    if not pool:
+        sys.exit(f"No .txt decks found in {decks_folder}")
+    k = len(pool) if decks_per_eval <= 0 else min(decks_per_eval, len(pool))
+    sample = rng.sample(pool, k)
+
+    scratch = tempfile.mkdtemp(prefix="deck_rotation_")
+    for deck_path in sample:
+        os.symlink(deck_path.resolve(), Path(scratch) / deck_path.name)
+    return scratch
+
+
+def evaluate(params, args, seed, decks_folder):
     """Run the gauntlet for one candidate and return (fitness, raw_report)."""
     with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as pf:
         json.dump(params, pf)
@@ -127,8 +161,8 @@ def evaluate(params, args, seed):
         "--params", params_path,
         "--opponents", args.opponents,
         "--games", str(args.games),
-        "--max-decks", str(args.decks),
-        "--decks-folder", args.decks_folder,
+        "--max-decks", "0",  # decks_folder is already exactly the rotated sample
+        "--decks-folder", decks_folder,
         "--seed", str(seed),
     ] + ([] if not args.opponent_params else [
         "--opponent-params", args.opponent_params,
@@ -184,7 +218,11 @@ def main():
     print(f"Optimizing {len(free_names)} of {len(FIELD_NAMES)} coefficients "
           f"(frozen: {sorted(FROZEN)})")
 
-    baseline_fitness, baseline_report = evaluate(dict(BASELINE), args, args.seed)
+    deck_rng = random.Random(args.seed)
+    deck_folder = rotate_deck_folder(args.decks_folder, args.decks, deck_rng)
+    print(f"  [decks: {', '.join(dp.name for dp in sorted(Path(deck_folder).iterdir()))}]")
+
+    baseline_fitness, baseline_report = evaluate(dict(BASELINE), args, args.seed, deck_folder)
     if baseline_report:
         print(f"Baseline fitness: {baseline_fitness:.4f} "
               f"(win rate {baseline_report['win_rate']:.3f}, "
@@ -197,36 +235,46 @@ def main():
     seed = args.seed
     start = time.time()
 
-    for gen in range(args.generations):
-        if args.seed_rotation and gen > 0 and gen % args.seed_rotation == 0:
-            seed += 1000
-            # Re-score the incumbent on the new seeds so comparisons stay honest.
-            best_fitness, _ = evaluate(best_params, args, seed)
-            print(f"  [seed rotated to {seed}; incumbent re-scored at {best_fitness:.4f}]")
+    try:
+        for gen in range(args.generations):
+            deck_folder = rotate_deck_folder(args.decks_folder, args.decks, deck_rng, deck_folder)
 
-        solutions = es.ask()
-        fitnesses = []
-        for z in solutions:
-            fit, _ = evaluate(z_to_params(z, free_names), args, seed)
-            fitnesses.append(-fit)  # cma minimizes
+            if args.seed_rotation and gen > 0 and gen % args.seed_rotation == 0:
+                seed += 1000
+                # Re-score the incumbent on the new seeds so comparisons stay honest.
+                best_fitness, _ = evaluate(best_params, args, seed, deck_folder)
+                print(f"  [seed rotated to {seed}; incumbent re-scored at {best_fitness:.4f}]")
 
-        es.tell(solutions, fitnesses)
+            solutions = es.ask()
+            fitnesses = []
+            for z in solutions:
+                fit, _ = evaluate(z_to_params(z, free_names), args, seed, deck_folder)
+                fitnesses.append(-fit)  # cma minimizes
 
-        gen_best_idx = int(np.argmin(fitnesses))
-        gen_best_fit = -fitnesses[gen_best_idx]
-        if gen_best_fit > best_fitness:
-            best_fitness = gen_best_fit
-            best_params = z_to_params(solutions[gen_best_idx], free_names)
-            with open(args.out, "w") as f:
-                json.dump(best_params, f, indent=2)
-            marker = " *saved*"
-        else:
-            marker = ""
+            es.tell(solutions, fitnesses)
 
-        elapsed = time.time() - start
-        print(f"gen {gen+1:3d}/{args.generations}  best={gen_best_fit:.4f}  "
-              f"incumbent={best_fitness:.4f}  ({elapsed/60:.1f} min){marker}")
+            gen_best_idx = int(np.argmin(fitnesses))
+            gen_best_fit = -fitnesses[gen_best_idx]
+            if gen_best_fit > best_fitness:
+                best_fitness = gen_best_fit
+                best_params = z_to_params(solutions[gen_best_idx], free_names)
+                with open(args.out, "w") as f:
+                    json.dump(best_params, f, indent=2)
+                marker = " *saved*"
+            else:
+                marker = ""
 
+            elapsed = time.time() - start
+            print(f"gen {gen+1:3d}/{args.generations}  best={gen_best_fit:.4f}  "
+                  f"incumbent={best_fitness:.4f}  ({elapsed/60:.1f} min){marker}")
+    finally:
+        shutil.rmtree(deck_folder, ignore_errors=True)
+
+    # Write unconditionally: the loop only writes args.out when a generation beats the prior
+    # incumbent, so a run that never improves on the baseline would otherwise leave this message
+    # claiming a file that was never created.
+    with open(args.out, "w") as f:
+        json.dump(best_params, f, indent=2)
     print(f"\nBest fitness {best_fitness:.4f} written to {args.out}")
     print("Validate on unseen seeds and more decks before trusting it, e.g.:")
     print(f"  cargo run --release --bin eval_bot -- --candidate e1 --params {args.out} "
