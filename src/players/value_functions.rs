@@ -40,6 +40,19 @@ pub struct ValueFunctionParams {
     /// 1.0 when the opponent's active can knock out my active right now.
     #[serde(default)]
     pub opponent_can_ko_my_active: f64,
+    /// Count of hand cards that are an immediately playable board-development move: a Basic
+    /// Pokemon with an open bench slot, or an evolution card for an in-play Pokemon that hasn't
+    /// been played this turn. Differenced against the opponent's count, like `hand_size`.
+    #[serde(default)]
+    pub playable_hand_size: f64,
+    /// 1.0 when the active Pokemon has a matching evolution card in hand and hasn't been played
+    /// this turn, i.e. it can evolve right now.
+    #[serde(default)]
+    pub evolution_readiness: f64,
+    /// Count of benched Pokemon (not played this turn) that have a matching evolution card in
+    /// hand -- reserves one turn away from leveling up.
+    #[serde(default)]
+    pub bench_evolution_potential: f64,
 }
 
 impl ValueFunctionParams {
@@ -62,6 +75,9 @@ impl ValueFunctionParams {
             active_weakness_matchup: 0.0,
             can_ko_opponent_active: 0.0,
             opponent_can_ko_my_active: 0.0,
+            playable_hand_size: 0.0,
+            evolution_readiness: 0.0,
+            bench_evolution_potential: 0.0,
         }
     }
 
@@ -84,13 +100,16 @@ impl ValueFunctionParams {
             active_weakness_matchup: 0.0,
             can_ko_opponent_active: 0.0,
             opponent_can_ko_my_active: 0.0,
+            playable_hand_size: 0.0,
+            evolution_readiness: 0.0,
+            bench_evolution_potential: 0.0,
         }
     }
 
     /// Field order used by `to_vec` / `from_vec`. Kept explicit (rather than derived) because
     /// external optimizers index into this vector positionally; reordering it silently
     /// invalidates every params file already on disk.
-    pub const FIELD_NAMES: [&'static str; 16] = [
+    pub const FIELD_NAMES: [&'static str; 19] = [
         "points",
         "pokemon_value",
         "hand_size",
@@ -107,6 +126,9 @@ impl ValueFunctionParams {
         "active_weakness_matchup",
         "can_ko_opponent_active",
         "opponent_can_ko_my_active",
+        "playable_hand_size",
+        "evolution_readiness",
+        "bench_evolution_potential",
     ];
 
     /// Load coefficients from a JSON file. This is the seam that lets an external optimizer
@@ -144,6 +166,9 @@ impl ValueFunctionParams {
             self.active_weakness_matchup,
             self.can_ko_opponent_active,
             self.opponent_can_ko_my_active,
+            self.playable_hand_size,
+            self.evolution_readiness,
+            self.bench_evolution_potential,
         ]
     }
 
@@ -173,6 +198,9 @@ impl ValueFunctionParams {
             active_weakness_matchup: values[13],
             can_ko_opponent_active: values[14],
             opponent_can_ko_my_active: values[15],
+            playable_hand_size: values[16],
+            evolution_readiness: values[17],
+            bench_evolution_potential: values[18],
         })
     }
 }
@@ -185,9 +213,7 @@ impl Default for ValueFunctionParams {
 
 /// Build a `ValueFunction` closure that evaluates states with the given coefficients.
 pub fn params_value_function(params: ValueFunctionParams) -> crate::players::ValueFunction {
-    Box::new(move |state: &State, myself: usize| {
-        parametric_value_function(state, myself, &params)
-    })
+    Box::new(move |state: &State, myself: usize| parametric_value_function(state, myself, &params))
 }
 
 pub fn baseline_value_function(state: &State, myself: usize) -> f64 {
@@ -230,7 +256,11 @@ pub fn parametric_value_function(
         // so unlike the features above they are used directly rather than differenced.
         + active_weakness_matchup(state, myself) * params.active_weakness_matchup
         + can_ko_active(state, myself) * params.can_ko_opponent_active
-        + can_ko_active(state, opponent) * params.opponent_can_ko_my_active;
+        + can_ko_active(state, opponent) * params.opponent_can_ko_my_active
+        + (my.playable_hand_size - opp.playable_hand_size) * params.playable_hand_size
+        + (my.evolution_readiness - opp.evolution_readiness) * params.evolution_readiness
+        + (my.bench_evolution_potential - opp.bench_evolution_potential)
+            * params.bench_evolution_potential;
     trace!("parametric_value_function: {score} (params: {params:?}, my: {my:?}, opp: {opp:?})");
     score
 }
@@ -251,6 +281,9 @@ struct Features {
     is_winner: f64,
     turns_until_opponent_wins: f64,
     discard_size: f64,
+    playable_hand_size: f64,
+    evolution_readiness: f64,
+    bench_evolution_potential: f64,
 }
 
 /// Extract features for a single player
@@ -268,6 +301,9 @@ fn extract_features(state: &State, player: usize, active_factor: f64) -> Feature
     let is_winner = check_is_winner(state, player);
     let turns_until_opponent_wins = calculate_turns_until_opponent_wins(state, player);
     let discard_size = state.discard_piles[player].len() as f64;
+    let playable_hand_size = calculate_playable_hand_size(state, player);
+    let evolution_readiness = calculate_evolution_readiness(state, player);
+    let bench_evolution_potential = calculate_bench_evolution_potential(state, player);
 
     Features {
         points,
@@ -283,6 +319,9 @@ fn extract_features(state: &State, player: usize, active_factor: f64) -> Feature
         is_winner,
         turns_until_opponent_wins,
         discard_size,
+        playable_hand_size,
+        evolution_readiness,
+        bench_evolution_potential,
     }
 }
 
@@ -559,5 +598,210 @@ fn can_ko_active(state: &State, player: usize) -> f64 {
         affordable && attack.fixed_damage + weakness_bonus >= target_hp
     });
 
-    if can_ko { 1.0 } else { 0.0 }
+    if can_ko {
+        1.0
+    } else {
+        0.0
+    }
+}
+
+/// Count of hand cards that represent an immediately actionable board-development play: a
+/// Basic Pokemon (if a bench slot is open) or an evolution card for an in-play Pokemon that
+/// hasn't been played this turn.
+///
+/// This is an approximation, not a legality check: it doesn't dedupe against a limited number
+/// of bench slots or evolution targets (e.g. two Basics in hand with only one open slot both
+/// count), and Trainer cards are excluded entirely -- their real preconditions (deck contents,
+/// damage state, per-turn limits) would require running move generation, which is too slow to
+/// call at every search leaf.
+fn calculate_playable_hand_size(state: &State, player: usize) -> f64 {
+    let open_bench_slots = state.in_play_pokemon[player][1..]
+        .iter()
+        .filter(|slot| slot.is_none())
+        .count();
+
+    state.hands[player]
+        .iter()
+        .filter(|card| match card {
+            Card::Pokemon(pokemon) if pokemon.stage == 0 => open_bench_slots > 0,
+            Card::Pokemon(_) => state.enumerate_in_play_pokemon(player).any(|(_, in_play)| {
+                !in_play.played_this_turn && in_play.card.can_evolve_into(card)
+            }),
+            Card::Trainer(_) => false,
+        })
+        .count() as f64
+}
+
+/// 1.0 when the active Pokemon hasn't been played this turn and a matching evolution card is
+/// in hand, i.e. it can evolve right now. Ignores ability-based exceptions to the normal
+/// evolution timing rule (e.g. Aerodactyl ex's Primeval Law, boosted first-turn evolution) --
+/// the same approximation tradeoff as `can_ko_active`.
+fn calculate_evolution_readiness(state: &State, player: usize) -> f64 {
+    let Some(active) = state.maybe_get_active(player) else {
+        return 0.0;
+    };
+    if active.played_this_turn {
+        return 0.0;
+    }
+    let can_evolve = state.hands[player]
+        .iter()
+        .any(|card| active.card.can_evolve_into(card));
+    if can_evolve {
+        1.0
+    } else {
+        0.0
+    }
+}
+
+/// Count of benched Pokemon (not played this turn) that have a matching evolution card in
+/// hand -- reserves one turn away from leveling up. Same approximation tradeoffs as
+/// `calculate_evolution_readiness`: no dedup against hand cards shared by multiple targets, and
+/// ability-based timing exceptions are ignored.
+fn calculate_bench_evolution_potential(state: &State, player: usize) -> f64 {
+    state
+        .enumerate_bench_pokemon(player)
+        .filter(|(_, bench_pokemon)| {
+            !bench_pokemon.played_this_turn
+                && state.hands[player]
+                    .iter()
+                    .any(|card| bench_pokemon.card.can_evolve_into(card))
+        })
+        .count() as f64
+}
+
+#[cfg(test)]
+mod tier_b_feature_tests {
+    use super::*;
+    use crate::card_ids::CardId;
+    use crate::database::get_card_by_enum;
+    use crate::hooks::to_playable_card;
+
+    fn bulbasaur(played_this_turn: bool) -> PlayedCard {
+        to_playable_card(&get_card_by_enum(CardId::A1001Bulbasaur), played_this_turn)
+    }
+
+    fn ivysaur_card() -> Card {
+        get_card_by_enum(CardId::A1002Ivysaur)
+    }
+
+    fn unrelated_evolution_card() -> Card {
+        // Charizard doesn't evolve from Bulbasaur, so it should never match.
+        get_card_by_enum(CardId::A1035Charizard)
+    }
+
+    fn trainer_card() -> Card {
+        get_card_by_enum(CardId::PA001Potion)
+    }
+
+    #[test]
+    fn playable_hand_size_counts_basic_with_open_bench() {
+        let mut state = State::default();
+        state.in_play_pokemon[0][0] = Some(bulbasaur(false));
+        state.hands[0] = vec![get_card_by_enum(CardId::A1001Bulbasaur)];
+
+        assert_eq!(calculate_playable_hand_size(&state, 0), 1.0);
+    }
+
+    #[test]
+    fn playable_hand_size_excludes_basic_when_bench_full() {
+        let mut state = State::default();
+        state.in_play_pokemon[0] = [
+            Some(bulbasaur(false)),
+            Some(bulbasaur(false)),
+            Some(bulbasaur(false)),
+            Some(bulbasaur(false)),
+        ];
+        state.hands[0] = vec![get_card_by_enum(CardId::A1001Bulbasaur)];
+
+        assert_eq!(calculate_playable_hand_size(&state, 0), 0.0);
+    }
+
+    #[test]
+    fn playable_hand_size_counts_evolution_for_eligible_target() {
+        let mut state = State::default();
+        state.in_play_pokemon[0][0] = Some(bulbasaur(false));
+        state.hands[0] = vec![ivysaur_card()];
+
+        assert_eq!(calculate_playable_hand_size(&state, 0), 1.0);
+    }
+
+    #[test]
+    fn playable_hand_size_excludes_evolution_when_target_played_this_turn() {
+        let mut state = State::default();
+        state.in_play_pokemon[0][0] = Some(bulbasaur(true));
+        state.hands[0] = vec![ivysaur_card()];
+
+        assert_eq!(calculate_playable_hand_size(&state, 0), 0.0);
+    }
+
+    #[test]
+    fn playable_hand_size_excludes_trainer_cards() {
+        let mut state = State::default();
+        state.in_play_pokemon[0][0] = Some(bulbasaur(false));
+        state.hands[0] = vec![trainer_card()];
+
+        assert_eq!(calculate_playable_hand_size(&state, 0), 0.0);
+    }
+
+    #[test]
+    fn evolution_readiness_true_when_active_can_evolve() {
+        let mut state = State::default();
+        state.in_play_pokemon[0][0] = Some(bulbasaur(false));
+        state.hands[0] = vec![ivysaur_card()];
+
+        assert_eq!(calculate_evolution_readiness(&state, 0), 1.0);
+    }
+
+    #[test]
+    fn evolution_readiness_false_when_active_played_this_turn() {
+        let mut state = State::default();
+        state.in_play_pokemon[0][0] = Some(bulbasaur(true));
+        state.hands[0] = vec![ivysaur_card()];
+
+        assert_eq!(calculate_evolution_readiness(&state, 0), 0.0);
+    }
+
+    #[test]
+    fn evolution_readiness_false_without_matching_card_in_hand() {
+        let mut state = State::default();
+        state.in_play_pokemon[0][0] = Some(bulbasaur(false));
+        state.hands[0] = vec![unrelated_evolution_card()];
+
+        assert_eq!(calculate_evolution_readiness(&state, 0), 0.0);
+    }
+
+    #[test]
+    fn evolution_readiness_false_with_no_active() {
+        let state = State::default();
+        assert_eq!(calculate_evolution_readiness(&state, 0), 0.0);
+    }
+
+    #[test]
+    fn bench_evolution_potential_counts_ready_bench_pokemon() {
+        let mut state = State::default();
+        state.in_play_pokemon[0][0] = Some(bulbasaur(false)); // active; shouldn't count here
+        state.in_play_pokemon[0][1] = Some(bulbasaur(false)); // bench, ready to evolve
+        state.hands[0] = vec![ivysaur_card()];
+
+        assert_eq!(calculate_bench_evolution_potential(&state, 0), 1.0);
+    }
+
+    #[test]
+    fn bench_evolution_potential_excludes_played_this_turn() {
+        let mut state = State::default();
+        state.in_play_pokemon[0][1] = Some(bulbasaur(true));
+        state.hands[0] = vec![ivysaur_card()];
+
+        assert_eq!(calculate_bench_evolution_potential(&state, 0), 0.0);
+    }
+
+    #[test]
+    fn bench_evolution_potential_counts_multiple_bench_slots() {
+        let mut state = State::default();
+        state.in_play_pokemon[0][1] = Some(bulbasaur(false));
+        state.in_play_pokemon[0][2] = Some(bulbasaur(false));
+        state.hands[0] = vec![ivysaur_card(), ivysaur_card()];
+
+        assert_eq!(calculate_bench_evolution_potential(&state, 0), 2.0);
+    }
 }

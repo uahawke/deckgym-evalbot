@@ -57,6 +57,9 @@ FIELD_NAMES = [
     "active_weakness_matchup",
     "can_ko_opponent_active",
     "opponent_can_ko_my_active",
+    "playable_hand_size",
+    "evolution_readiness",
+    "bench_evolution_potential",
 ]
 
 BASELINE = {
@@ -78,6 +81,9 @@ BASELINE = {
     "active_weakness_matchup": 0.0,
     "can_ko_opponent_active": 0.0,
     "opponent_can_ko_my_active": 0.0,
+    "playable_hand_size": 0.0,
+    "evolution_readiness": 0.0,
+    "bench_evolution_potential": 0.0,
 }
 
 # Step scale per dimension. For zero-valued baselines there is no magnitude to infer, so we
@@ -90,6 +96,12 @@ SCALES["energy_distance_to_online"] = 50.0
 SCALES["active_weakness_matchup"] = 200.0
 SCALES["can_ko_opponent_active"] = 500.0
 SCALES["opponent_can_ko_my_active"] = 500.0
+# Tier B: evolution-line features, also disabled at baseline. playable_hand_size and
+# bench_evolution_potential are small integer counts (differenced, so roughly -5..5) like
+# hand_size; evolution_readiness is a 0/1 indicator on par with the Tier A tactical features.
+SCALES["playable_hand_size"] = 10.0
+SCALES["evolution_readiness"] = 300.0
+SCALES["bench_evolution_potential"] = 100.0
 
 FROZEN = {"is_winner"}
 
