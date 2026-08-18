@@ -239,11 +239,18 @@ def main():
         for gen in range(args.generations):
             deck_folder = rotate_deck_folder(args.decks_folder, args.decks, deck_rng, deck_folder)
 
+            seed_note = ""
             if args.seed_rotation and gen > 0 and gen % args.seed_rotation == 0:
                 seed += 1000
-                # Re-score the incumbent on the new seeds so comparisons stay honest.
-                best_fitness, _ = evaluate(best_params, args, seed, deck_folder)
-                print(f"  [seed rotated to {seed}; incumbent re-scored at {best_fitness:.4f}]")
+                seed_note = f"seed rotated to {seed}; "
+
+            # The deck sample changes every generation, so the incumbent's score from a prior
+            # generation was measured against decks that no longer exist in this generation's
+            # sample -- comparing it directly to gen_best_fit below would be apples-to-oranges.
+            # Re-score on the current sample first, exactly like seed rotation does, just every
+            # generation instead of periodically (since decks rotate every generation).
+            best_fitness, _ = evaluate(best_params, args, seed, deck_folder)
+            print(f"  [{seed_note}decks rotated; incumbent re-scored at {best_fitness:.4f}]")
 
             solutions = es.ask()
             fitnesses = []
