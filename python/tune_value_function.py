@@ -211,6 +211,12 @@ def main():
     p.add_argument("--seed", type=int, default=1)
     p.add_argument("--seed-rotation", type=int, default=5, help="0 disables rotation")
     p.add_argument("--tie-penalty", type=float, default=0.25)
+    p.add_argument("--init-params", default=None,
+                   help="JSON params to seed the search from (e.g. the current champion), "
+                        "instead of starting every run from BASELINE re-discovering the same "
+                        "ground each time. Only affects free (unfrozen) dimensions; any "
+                        "coefficient missing from the file (e.g. a feature added after it was "
+                        "tuned) falls back to BASELINE for that dimension.")
     p.add_argument("--out", default="tuned_params.json")
     args = p.parse_args()
 
@@ -218,20 +224,29 @@ def main():
     print(f"Optimizing {len(free_names)} of {len(FIELD_NAMES)} coefficients "
           f"(frozen: {sorted(FROZEN)})")
 
+    init_source = dict(BASELINE)
+    if args.init_params:
+        with open(args.init_params) as f:
+            loaded = json.load(f)
+        missing = [n for n in free_names if n not in loaded]
+        init_source.update(loaded)
+        note = f"; missing from file, using BASELINE for: {missing}" if missing else ""
+        print(f"  [seeding search from {args.init_params}{note}]")
+    z0 = np.array([(init_source[name] - BASELINE[name]) / SCALES[name] for name in free_names])
+
     deck_rng = random.Random(args.seed)
     deck_folder = rotate_deck_folder(args.decks_folder, args.decks, deck_rng)
     print(f"  [decks: {', '.join(dp.name for dp in sorted(Path(deck_folder).iterdir()))}]")
 
-    baseline_fitness, baseline_report = evaluate(dict(BASELINE), args, args.seed, deck_folder)
-    if baseline_report:
-        print(f"Baseline fitness: {baseline_fitness:.4f} "
-              f"(win rate {baseline_report['win_rate']:.3f}, "
-              f"{baseline_report['ties']} ties / {baseline_report['total_games']} games)")
+    best_params = z_to_params(z0, free_names)
+    best_fitness, start_report = evaluate(best_params, args, args.seed, deck_folder)
+    if start_report:
+        print(f"Starting fitness: {best_fitness:.4f} "
+              f"(win rate {start_report['win_rate']:.3f}, "
+              f"{start_report['ties']} ties / {start_report['total_games']} games)")
 
-    es = cma.CMAEvolutionStrategy(np.zeros(len(free_names)), args.sigma,
-                                  {"popsize": args.popsize, "verbose": -9})
+    es = cma.CMAEvolutionStrategy(z0, args.sigma, {"popsize": args.popsize, "verbose": -9})
 
-    best_fitness, best_params = baseline_fitness, dict(BASELINE)
     seed = args.seed
     start = time.time()
 

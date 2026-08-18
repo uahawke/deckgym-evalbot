@@ -18,6 +18,9 @@ on:
       opponent_params:
         description: 'Reference opponent params file'
         default: 'tuned_params_v5.json'
+      init_params:
+        description: 'Params to seed the search from (blank = start from BASELINE, the old behavior)'
+        default: 'tuned_params_v5.json'
       seed_rotation:
         description: 'Rotate seeds every N generations (0 disables)'
         default: '5'
@@ -66,6 +69,10 @@ jobs:
 
       - name: Run tuner
         run: |
+          INIT_FLAG=""
+          if [ -n "${{ inputs.init_params }}" ]; then
+            INIT_FLAG="--init-params ${{ inputs.init_params }}"
+          fi
           python -u python/tune_value_function.py \
             --generations ${{ inputs.generations }} \
             --popsize ${{ inputs.popsize }} \
@@ -77,6 +84,7 @@ jobs:
             --seed ${{ matrix.seed }} \
             --seed-rotation ${{ inputs.seed_rotation }} \
             --tie-penalty ${{ inputs.tie_penalty }} \
+            $INIT_FLAG \
             --out tuned_params_ci.json 2>&1 | tee tune.log
 
       - name: Validate on held-out decks
