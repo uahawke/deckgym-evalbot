@@ -85,6 +85,7 @@ python -u python/tune_value_function.py \
   --generations 20 --popsize 12 --games 50 --decks 12 \
   --decks-folder <training_decks_only> \
   --opponents e1 --opponent-params <champion>.json \
+  --init-params <champion>.json \
   --out tuned_params_vN.json
 ```
 
@@ -94,6 +95,17 @@ python -u python/tune_value_function.py \
   stays empty for hours.
 - New coefficients should default to `0.0` so the baseline is numerically unchanged and any gain
   is attributable to the feature rather than a moved starting point.
+- **`--decks` is a per-generation sample size, not a fixed subset.** A fresh random sample is
+  drawn from `--decks-folder` every generation (deterministic from `--seed`), so an 18-generation
+  run at `--decks 12` covers most or all of a 29-deck pool over the course of a run instead of
+  memorizing one fixed subset. The incumbent is re-scored on each new sample before comparing, so
+  generation-to-generation comparisons stay honest -- if you add any other kind of rotation,
+  re-score the incumbent on the new condition too, or `best > candidate` comparisons become
+  apples-to-oranges.
+- **`--init-params <file>` seeds the search from an existing champion's coefficients** instead of
+  re-discovering BASELINE from scratch every run. It gives a much better *starting* fitness, but
+  did not reliably improve *final* validation quality after 18 generations in practice --
+  seed-to-seed variance dominates regardless of starting point (see Known findings).
 
 Scale normalization is required: raw coefficients span 10,000 to 0.1, and CMA-ES uses one step
 size across all dimensions. The tuner optimizes `param = baseline + z * scale`.
@@ -130,6 +142,50 @@ cargo run --release --bin eval_bot -- \
 - **`energy_distance_to_online` matters** and ships disabled at `0.0`. Every run switches it on.
 - **`online_pokemon_count` is consistently declined** (tuned to ~0), suggesting it is redundant
   with other features.
+- **Tier B (evolution-line) signs: two of three settled.** `playable_hand_size` (positive) and
+  `bench_evolution_potential` (negative) agree in sign across every independent run tried, so
+  they're frozen at their observed average rather than re-discovered each time.
+  `evolution_readiness`'s sign flips between runs and remains unsettled -- leave it free.
+- **The training pool has almost no Stage-2 evolution content.** Only 2 of 29 decks in
+  `decks/train` (`hitmonlee.txt`, `mewtwoex.txt`) contain any Stage-2 Pokemon, and none carry
+  Rare Candy. Features about evolution-line progress get very little training signal from the
+  standard pool -- plausibly why Tier B validates in the right direction (see above) without
+  closing the blastoiseex gap (below). A deck pool built for a specific feature set should
+  actually contain the situations that feature is meant to recognize.
+- **CMA-ES seed-to-seed variance dominates over starting point.** Seeding the search from
+  `tuned_params_v5.json` (via `--init-params`) gives a much better starting fitness (~0.47-0.51
+  vs. BASELINE's ~0.37-0.40) but final validation quality after 18 generations was statistically
+  indistinguishable with and without seeding across three-seed replicate runs -- and which seed
+  ends up best/worst flips between runs. At `--generations 18 --popsize 12`, the search does not
+  reliably converge to the same quality region regardless of where it starts.
+- **`active_weakness_matchup` / `can_ko_opponent_active`'s negative signs held up under a paired
+  sign-flip test** (see "surprising sign" rule above): negating both together lost head-to-head to
+  the un-flipped version, at roughly the same margin as the original's loss to baseline on the
+  same matchup -- so despite reading backwards from their own doc comments, they're net beneficial
+  as tuned. Not yet tested in isolation from each other: a free search from v5 moved
+  `active_weakness_matchup` toward positive in 2 of 3 seeds in one run, which is suggestive but
+  unconfirmed without an isolated test.
+- **blastoiseex is still unresolved**, across every approach tried so far (general retuning, Tier
+  B features, deck rotation, v5-seeded search): no run has beaten 50% on it across *all* seeds in
+  that run. Individual seeds have hit 53-57%, always alongside another seed in the same run at
+  31-40%. Treat a single-seed blastoiseex win as noise until it replicates.
+
+## Open threads
+
+Not yet tried, roughly in order of expected leverage given the findings above:
+
+- **More games per cell.** 50 games/cell is noisy at near-50% win rates; CMA-ES may be chasing
+  fitness-estimate noise as much as real signal, independent of starting point or deck sampling.
+- **More generations.** Untested in combination with deck rotation + `--init-params` -- seeding
+  gets a good start faster, so it may pay off more with a longer run than BASELINE-start runs did.
+- **An isolated `active_weakness_matchup`-only sign-flip test**, decoupled from
+  `can_ko_opponent_active`, to resolve the ambiguity noted above.
+- **A mid-run held-out probe with early stopping**, so a run that's drifting away from
+  generalizing gets caught during the run instead of discovered after several hours.
+- **A deck pool that actually contains Stage-2/slow-evolution archetypes**, if evolution-line
+  features are worth continuing to invest in -- the current pool can't teach what it doesn't
+  contain. Note this needs care: adding more such decks to `decks/train` changes what "the training
+  pool" means for every finding above that references it.
 
 ## Information leakage (important for human-facing play)
 
