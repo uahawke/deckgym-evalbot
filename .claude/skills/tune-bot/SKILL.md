@@ -158,13 +158,14 @@ cargo run --release --bin eval_bot -- \
   indistinguishable with and without seeding across three-seed replicate runs -- and which seed
   ends up best/worst flips between runs. At `--generations 18 --popsize 12`, the search does not
   reliably converge to the same quality region regardless of where it starts.
-- **`active_weakness_matchup` / `can_ko_opponent_active`'s negative signs held up under a paired
-  sign-flip test** (see "surprising sign" rule above): negating both together lost head-to-head to
-  the un-flipped version, at roughly the same margin as the original's loss to baseline on the
-  same matchup -- so despite reading backwards from their own doc comments, they're net beneficial
-  as tuned. Not yet tested in isolation from each other: a free search from v5 moved
-  `active_weakness_matchup` toward positive in 2 of 3 seeds in one run, which is suggestive but
-  unconfirmed without an isolated test.
+- **`can_ko_opponent_active`'s negative sign is the load-bearing one; `active_weakness_matchup`'s
+  isn't.** A paired sign-flip test (negating both together) lost decisively to the un-flipped
+  version (43.75% vs. v5 on the blastoiseex mirror). Following up with an isolated flip of
+  `active_weakness_matchup` alone, on the standard 10-deck set, landed at 49.48% [47.70%, 51.27%]
+  against v5 -- statistically indistinguishable, not a loss. So the paired test's decisive loss is
+  attributable to `can_ko_opponent_active`, which despite reading backwards from its own doc
+  comment is genuinely net beneficial as tuned. `active_weakness_matchup`'s sign, on its own,
+  barely matters either way -- treat it as close to inert rather than settled in either direction.
 - **blastoiseex is still unresolved**, across every approach tried so far (general retuning, Tier
   B features, deck rotation, v5-seeded search): no run has beaten 50% on it across *all* seeds in
   that run. Individual seeds have hit 53-57%, always alongside another seed in the same run at
@@ -178,8 +179,6 @@ Not yet tried, roughly in order of expected leverage given the findings above:
   fitness-estimate noise as much as real signal, independent of starting point or deck sampling.
 - **More generations.** Untested in combination with deck rotation + `--init-params` -- seeding
   gets a good start faster, so it may pay off more with a longer run than BASELINE-start runs did.
-- **An isolated `active_weakness_matchup`-only sign-flip test**, decoupled from
-  `can_ko_opponent_active`, to resolve the ambiguity noted above.
 - **A mid-run held-out probe with early stopping**, so a run that's drifting away from
   generalizing gets caught during the run instead of discovered after several hours.
 - **A deck pool that actually contains Stage-2/slow-evolution archetypes**, if evolution-line
