@@ -30,6 +30,15 @@ on:
       seeds:
         description: 'Comma-separated base seeds; each runs as a parallel replicate'
         default: '1'
+      probe_games:
+        description: 'Games per held-out probe cell (0 disables the probe)'
+        default: '100'
+      probe_interval:
+        description: 'Probe the incumbent against held-out decks every N generations'
+        default: '3'
+      probe_patience:
+        description: 'Stop early after this many consecutive probe checks with no improvement (0 disables early stopping)'
+        default: '5'
 
 jobs:
   # One replicate per seed. Independent runs make it possible to tell a real gain
@@ -84,6 +93,9 @@ jobs:
             --seed ${{ matrix.seed }} \
             --seed-rotation ${{ inputs.seed_rotation }} \
             --tie-penalty ${{ inputs.tie_penalty }} \
+            --probe-games ${{ inputs.probe_games }} \
+            --probe-interval ${{ inputs.probe_interval }} \
+            --probe-patience ${{ inputs.probe_patience }} \
             $INIT_FLAG \
             --out tuned_params_ci.json 2>&1 | tee tune.log
 
@@ -95,11 +107,24 @@ jobs:
             --games 150 --max-decks 10 --seed 999999 \
             --json validation.json | tee validation.txt
 
+      - name: Validate best-by-probe checkpoint on held-out decks
+        if: hashFiles('tuned_params_ci.probe_best.json') != ''
+        run: |
+          cargo run --release --bin eval_bot -- \
+            --candidate e1 --params tuned_params_ci.probe_best.json \
+            --opponents e1 --opponent-params ${{ inputs.opponent_params }} \
+            --games 150 --max-decks 10 --seed 999999 \
+            --json validation_probe_best.json | tee validation_probe_best.txt
+
       - uses: actions/upload-artifact@v4
         with:
           name: tuning-results-seed${{ matrix.seed }}
           path: |
             tuned_params_ci.json
+            tuned_params_ci.probe_best.json
             tune.log
             validation.json
             validation.txt
+            validation_probe_best.json
+            validation_probe_best.txt
+          if-no-files-found: ignore

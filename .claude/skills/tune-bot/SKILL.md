@@ -106,6 +106,16 @@ python -u python/tune_value_function.py \
   re-discovering BASELINE from scratch every run. It gives a much better *starting* fitness, but
   did not reliably improve *final* validation quality after 18 generations in practice --
   seed-to-seed variance dominates regardless of starting point (see Known findings).
+- **The tuner probes held-out decks mid-run and can stop early.** Every `--probe-interval`
+  generations it evaluates the training incumbent against whatever's in `--probe-source-folder`
+  (default `example_decks`) but NOT in `--decks-folder` -- e.g. the three decks `decks/train`
+  excludes -- on a fixed `--probe-seed` so probe-to-probe comparisons stay paired. This never
+  feeds into CMA-ES's own objective (`es.tell()` never sees it); it only tracks a separate
+  best-by-probe checkpoint, written to `--probe-out` (default: `--out` with `.probe_best`
+  inserted), and stops the run after `--probe-patience` consecutive checks with no improvement
+  (`0` disables early stopping but keeps probing/reporting). **Prefer the `.probe_best.json`
+  output over the plain `--out` file** when both exist -- see Known findings for why training
+  fitness alone isn't trustworthy. `--probe-games 0` disables probing entirely.
 
 Scale normalization is required: raw coefficients span 10,000 to 0.1, and CMA-ES uses one step
 size across all dimensions. The tuner optimizes `param = baseline + z * scale`.
@@ -179,8 +189,7 @@ Not yet tried, roughly in order of expected leverage given the findings above:
   fitness-estimate noise as much as real signal, independent of starting point or deck sampling.
 - **More generations.** Untested in combination with deck rotation + `--init-params` -- seeding
   gets a good start faster, so it may pay off more with a longer run than BASELINE-start runs did.
-- **A mid-run held-out probe with early stopping**, so a run that's drifting away from
-  generalizing gets caught during the run instead of discovered after several hours.
+  Now cheaper to explore since the held-out probe can cut a run short if it isn't paying off.
 - **A deck pool that actually contains Stage-2/slow-evolution archetypes**, if evolution-line
   features are worth continuing to invest in -- the current pool can't teach what it doesn't
   contain. Note this needs care: adding more such decks to `decks/train` changes what "the training

@@ -29,6 +29,14 @@ Design notes:
   CMA-ES could memorize answers to a fixed deck quiz instead of generalizing. Every generation we
   symlink a fresh random --decks-sized sample from --decks-folder into a scratch dir and point
   eval_bot at that instead, so the full pool gets sampled over the course of a run.
+
+* **Held-out probe.** Training fitness has repeatedly climbed to ~0.50 while final validation on
+  held-out decks came in decisively lower -- discovered only after a multi-hour run finished. The
+  probe evaluates the current training incumbent against decks in --probe-source-folder that are
+  NOT in --decks-folder (e.g. the three decks decks/train excludes) every --probe-interval
+  generations, on a fixed seed so probe-to-probe comparisons stay paired. It never feeds into
+  es.tell() -- CMA-ES doesn't see it and can't optimize against it -- it only tracks a separate
+  "best by held-out signal" checkpoint and can stop the run early if that checkpoint goes stale.
 """
 
 import argparse
@@ -148,8 +156,9 @@ def rotate_deck_folder(decks_folder, decks_per_eval, rng, previous=None):
     return scratch
 
 
-def evaluate(params, args, seed, decks_folder):
-    """Run the gauntlet for one candidate and return (fitness, raw_report)."""
+def evaluate(params, args, seed, decks_folder, games=None):
+    """Run the gauntlet for one candidate and return (fitness, raw_report). `games` overrides
+    args.games -- used by the held-out probe, which runs a different games-per-cell budget."""
     with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as pf:
         json.dump(params, pf)
         params_path = pf.name
@@ -160,8 +169,8 @@ def evaluate(params, args, seed, decks_folder):
         "--candidate", args.candidate,
         "--params", params_path,
         "--opponents", args.opponents,
-        "--games", str(args.games),
-        "--max-decks", "0",  # decks_folder is already exactly the rotated sample
+        "--games", str(games if games is not None else args.games),
+        "--max-decks", "0",  # decks_folder is already exactly the rotated/probe sample
         "--decks-folder", decks_folder,
         "--seed", str(seed),
     ] + ([] if not args.opponent_params else [
@@ -218,7 +227,31 @@ def main():
                         "coefficient missing from the file (e.g. a feature added after it was "
                         "tuned) falls back to BASELINE for that dimension.")
     p.add_argument("--out", default="tuned_params.json")
+    p.add_argument("--probe-source-folder", default="example_decks",
+                   help="Superset folder decks are drawn from. The held-out probe set is every "
+                        "deck in this folder that is NOT also in --decks-folder (e.g. "
+                        "example_decks minus decks/train). Empty result disables probing.")
+    p.add_argument("--probe-games", type=int, default=100,
+                   help="Games per (deck, seat) cell for the held-out probe. 0 disables probing.")
+    p.add_argument("--probe-interval", type=int, default=3,
+                   help="Probe the training incumbent against the held-out set every N "
+                        "generations")
+    p.add_argument("--probe-patience", type=int, default=5,
+                   help="Stop early if the probe hasn't found a new best in this many "
+                        "consecutive checks. 0 disables early stopping (probe still runs and is "
+                        "still reported).")
+    p.add_argument("--probe-seed", type=int, default=999999,
+                   help="Fixed seed for probe evals, so probe-to-probe comparisons stay paired "
+                        "and low-noise -- matches the final validation seed convention.")
+    p.add_argument("--probe-out", default=None,
+                   help="Where to write the best-by-probe checkpoint (default: --out with "
+                        ".probe_best inserted before .json)")
     args = p.parse_args()
+    if args.probe_out is None:
+        args.probe_out = (
+            args.out[: -len(".json")] + ".probe_best.json"
+            if args.out.endswith(".json") else args.out + ".probe_best.json"
+        )
 
     free_names = [n for n in FIELD_NAMES if n not in FROZEN]
     print(f"Optimizing {len(free_names)} of {len(FIELD_NAMES)} coefficients "
@@ -238,6 +271,22 @@ def main():
     deck_folder = rotate_deck_folder(args.decks_folder, args.decks, deck_rng)
     print(f"  [decks: {', '.join(dp.name for dp in sorted(Path(deck_folder).iterdir()))}]")
 
+    probe_folder = None
+    if args.probe_games > 0:
+        train_names = {dp.name for dp in Path(args.decks_folder).glob("*.txt")}
+        probe_decks = sorted(
+            dp for dp in Path(args.probe_source_folder).glob("*.txt")
+            if dp.name not in train_names
+        )
+        if not probe_decks:
+            print(f"  [probe disabled: no decks in {args.probe_source_folder} outside "
+                  f"{args.decks_folder}]")
+        else:
+            probe_folder = tempfile.mkdtemp(prefix="probe_decks_")
+            for deck_path in probe_decks:
+                os.symlink(deck_path.resolve(), Path(probe_folder) / deck_path.name)
+            print(f"  [probe set: {', '.join(dp.name for dp in probe_decks)}]")
+
     best_params = z_to_params(z0, free_names)
     best_fitness, start_report = evaluate(best_params, args, args.seed, deck_folder)
     if start_report:
@@ -245,10 +294,23 @@ def main():
               f"(win rate {start_report['win_rate']:.3f}, "
               f"{start_report['ties']} ties / {start_report['total_games']} games)")
 
+    probe_best_fitness = None
+    probe_stale = 0
+    if probe_folder:
+        probe_best_fitness, probe_report = evaluate(
+            best_params, args, args.probe_seed, probe_folder, games=args.probe_games)
+        if probe_report:
+            with open(args.probe_out, "w") as f:
+                json.dump(best_params, f, indent=2)
+            print(f"  [probe: starting fitness {probe_best_fitness:.4f} "
+                  f"(win rate {probe_report['win_rate']:.3f}, "
+                  f"{probe_report['ties']} ties / {probe_report['total_games']} games)]")
+
     es = cma.CMAEvolutionStrategy(z0, args.sigma, {"popsize": args.popsize, "verbose": -9})
 
     seed = args.seed
     start = time.time()
+    stopped_early = False
 
     try:
         for gen in range(args.generations):
@@ -289,15 +351,49 @@ def main():
             elapsed = time.time() - start
             print(f"gen {gen+1:3d}/{args.generations}  best={gen_best_fit:.4f}  "
                   f"incumbent={best_fitness:.4f}  ({elapsed/60:.1f} min){marker}")
+
+            if probe_folder and (gen + 1) % args.probe_interval == 0:
+                probe_fitness, probe_report = evaluate(
+                    best_params, args, args.probe_seed, probe_folder, games=args.probe_games)
+                if probe_report:
+                    if probe_fitness > probe_best_fitness:
+                        probe_best_fitness = probe_fitness
+                        probe_stale = 0
+                        with open(args.probe_out, "w") as f:
+                            json.dump(best_params, f, indent=2)
+                        probe_marker = " *saved*"
+                    else:
+                        probe_stale += 1
+                        probe_marker = ""
+                    print(f"  [probe gen {gen+1}: {probe_fitness:.4f}  "
+                          f"best-by-probe={probe_best_fitness:.4f}  "
+                          f"stale={probe_stale}/{args.probe_patience or '-'}{probe_marker}]")
+
+                    if args.probe_patience > 0 and probe_stale >= args.probe_patience:
+                        print(f"  [probe: no improvement in {probe_stale} checks -- stopping "
+                              f"early at generation {gen+1}/{args.generations}]")
+                        stopped_early = True
+                        break
     finally:
         shutil.rmtree(deck_folder, ignore_errors=True)
+        if probe_folder:
+            shutil.rmtree(probe_folder, ignore_errors=True)
 
     # Write unconditionally: the loop only writes args.out when a generation beats the prior
     # incumbent, so a run that never improves on the baseline would otherwise leave this message
     # claiming a file that was never created.
     with open(args.out, "w") as f:
         json.dump(best_params, f, indent=2)
-    print(f"\nBest fitness {best_fitness:.4f} written to {args.out}")
+    if stopped_early:
+        print(f"\nStopped early (probe stalled). Best-by-training fitness {best_fitness:.4f} "
+              f"written to {args.out}")
+    else:
+        print(f"\nBest fitness {best_fitness:.4f} written to {args.out}")
+    if probe_folder and probe_best_fitness is not None:
+        print(f"Best-by-probe fitness {probe_best_fitness:.4f} written to {args.probe_out} "
+              f"-- this is the more trustworthy candidate given how often training fitness has "
+              f"diverged from held-out validation in this project. Prefer it over {args.out} "
+              f"unless you have a specific reason not to.")
     print("Validate on unseen seeds and more decks before trusting it, e.g.:")
     print(f"  cargo run --release --bin eval_bot -- --candidate e1 --params {args.out} "
           f"--opponents r,w --games 200 --max-decks 8 --seed 999999")
