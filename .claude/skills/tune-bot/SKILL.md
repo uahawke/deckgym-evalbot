@@ -176,10 +176,15 @@ cargo run --release --bin eval_bot -- \
   attributable to `can_ko_opponent_active`, which despite reading backwards from its own doc
   comment is genuinely net beneficial as tuned. `active_weakness_matchup`'s sign, on its own,
   barely matters either way -- treat it as close to inert rather than settled in either direction.
-- **blastoiseex is still unresolved**, across every approach tried so far (general retuning, Tier
-  B features, deck rotation, v5-seeded search): no run has beaten 50% on it across *all* seeds in
-  that run. Individual seeds have hit 53-57%, always alongside another seed in the same run at
-  31-40%. Treat a single-seed blastoiseex win as noise until it replicates.
+- **blastoiseex is still unresolved as an outright win**, across every approach tried so far
+  (general retuning, Tier B features, deck rotation, v5-seeded search): no checkpoint has beaten
+  50% on it across *all* seeds in a run. But **selecting by the held-out probe instead of
+  training fitness is a real, validated improvement**, not just plumbing: in a 36-generation
+  v5-seeded run with the probe active, the probe-best checkpoint beat the training-best checkpoint
+  on blastoiseex in all 3 seeds (35.5/34.3/37.5% -> 52.7/47.7/46.8%, average 35.8% -> 49.1%) and on
+  overall validation in all 3 seeds too (two of three landing at "statistically indistinguishable
+  from v5" rather than "significantly weaker"). Prefer probe-best checkpoints over training-best
+  ones going forward -- see the probe note under "Running the tuner".
 
 ## Open threads
 
@@ -187,9 +192,12 @@ Not yet tried, roughly in order of expected leverage given the findings above:
 
 - **More games per cell.** 50 games/cell is noisy at near-50% win rates; CMA-ES may be chasing
   fitness-estimate noise as much as real signal, independent of starting point or deck sampling.
-- **More generations.** Untested in combination with deck rotation + `--init-params` -- seeding
-  gets a good start faster, so it may pay off more with a longer run than BASELINE-start runs did.
-  Now cheaper to explore since the held-out probe can cut a run short if it isn't paying off.
+- **More generations: inconclusive so far, confounded with the probe.** A `--generations 36` run
+  (double the usual 18) with the probe active let 2 of 3 seeds stop early at 15 and 18 -- right
+  around the old budget -- so it doesn't cleanly test whether more generations help on their own;
+  the probe-vs-training-fitness selection effect (above) dominated the result. Worth an isolated
+  test with `--probe-patience 0` (probe still reports, just can't cut the run short) to see
+  whether the extra generations do anything once that confound is removed.
 - **A deck pool that actually contains Stage-2/slow-evolution archetypes**, if evolution-line
   features are worth continuing to invest in -- the current pool can't teach what it doesn't
   contain. Note this needs care: adding more such decks to `decks/train` changes what "the training
