@@ -42,6 +42,9 @@ pub mod python_bindings;
 #[cfg(feature = "tui")]
 pub mod tui;
 
+#[cfg(feature = "server")]
+pub mod web;
+
 #[cfg(feature = "python")]
 use pyo3::prelude::*;
 #[cfg(feature = "python")]

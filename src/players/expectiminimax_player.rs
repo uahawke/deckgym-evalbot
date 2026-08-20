@@ -13,7 +13,7 @@ use super::Player;
 // Type alias for value functions
 // Takes a state and player index, returns a score
 // Using Box<dyn Fn> to allow closures with captured variables
-pub type ValueFunction = Box<dyn Fn(&State, usize) -> f64>;
+pub type ValueFunction = Box<dyn Fn(&State, usize) -> f64 + Send>;
 
 struct DebugStateNode {
     acting_player: usize,
