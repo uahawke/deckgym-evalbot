@@ -210,16 +210,27 @@ it never simulates the opponent's turn at any depth.
 
 - **`e1` does not leak.** With `max_depth = 1` the recursion depth is 0, so no opponent nodes are
   expanded at all.
-- **`e2`/`e3` have a narrow leak surface**: the minimizing branch handles stack-driven opponent
-  choices during your own turn (promoting after a knockout, forced discards) and enumerates them
-  with the full-information `generate_possible_actions`. There is an existing `TODO` in
-  `expectiminimax_player.rs` acknowledging this is unsound.
+- **`e2`/`e3`'s leak was audited and fixed (2026-08-19).** The minimizing branch only ever fires
+  for stack-driven opponent choices during your own turn, and every `move_generation_stack.push`
+  site in the codebase was checked. Two decision types are bench-promotion choices
+  (`knock_back_attack`, `switch_out_opponent_active_to_bench`) -- fully public, safe to search
+  exhaustively as-is. Exactly one leaked real hidden information: `nasty_notice_effect` (the Nasty
+  Notice card) queues the opponent's forced-discard choice via
+  `generate_combinations(&state.hands[opponent], ...)`, letting the search see the opponent's
+  actual hand to compute a worst-case discard. `silver_effect` looked similar but isn't a leak --
+  Silver's own card text reveals the opponent's hand as part of resolving it, so full information
+  there is correct, not a leak. Fix: `expectiminimax`'s minimizing branch now detects
+  `SimpleAction::DiscardOwnCards` (the only action type that reaches this branch via a
+  leak-causing site) and samples one action via `rng.gen_range` instead of exhaustively
+  minimizing over every real combination -- the same treatment the engine already gives other
+  hidden/random outcomes it can't legitimately search (e.g. discarding a random energy via a
+  direct rng roll). Public-information choices are untouched and still searched exhaustively.
+  Covered by two tests in `expectiminimax_player.rs`.
 - The value function itself does not leak: `calculate_active_pokemon_online_score` reads
   `deck + hand`, but that *union* is derivable from public information (decklist minus in-play
   minus discard).
 
-Before shipping `e2`/`e3` as difficulty tiers against human opponents, the minimizing branch needs
-a restricted move generator that enumerates only from public information.
+`e2`/`e3` no longer have a known information-leakage blocker for human-facing play on this front.
 
 ## Appendix
 

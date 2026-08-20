@@ -1,10 +1,11 @@
 use log::{trace, LevelFilter};
 use rand::rngs::StdRng;
+use rand::Rng;
 use std::fmt::Debug;
 use std::fmt::Write;
 use std::vec;
 
-use crate::actions::{forecast_action, Action};
+use crate::actions::{forecast_action, Action, SimpleAction};
 use crate::{Deck, State};
 
 use super::Player;
@@ -190,9 +191,33 @@ fn expectiminimax(
         };
         (best_score, state_node)
     } else {
-        // TODO: If minimizing, we can't just generate_possible_actions since
-        //  not everything is public information. So we would have to have
-        //  our own version of it that only returns the actions that are
+        // The opponent is choosing during my own turn (e.g. a forced discard from a card I
+        // played). Most such choices are built from public information (which benched Pokemon
+        // to promote, etc.) and are safe to search exhaustively -- the opponent's decision only
+        // depends on things I can already see. But `DiscardOwnCards` reaching this branch means
+        // the opponent is choosing among cards in their own hidden hand (the only site that
+        // queues it here is Nasty Notice, see apply_trainer_action.rs::nasty_notice_effect):
+        // exhaustively minimizing over every real combination would let the search see the
+        // opponent's actual hand to compute a worst-case discard, which no fair opponent-facing
+        // bot should be able to do. Sample one action instead, matching how the engine already
+        // treats other hidden/random outcomes it can't legitimately search (e.g. discarding a
+        // random energy via a direct rng roll rather than branching).
+        if actions
+            .first()
+            .is_some_and(|a| matches!(a.action, SimpleAction::DiscardOwnCards { .. }))
+        {
+            let sampled = &actions[rng.gen_range(0..actions.len())];
+            let (score, action_node) =
+                expected_value_function(rng, state, sampled, depth - 1, myself, value_function);
+            let state_node = DebugStateNode {
+                acting_player: actor,
+                children: vec![action_node],
+                proba: 0.0,
+                value: score,
+            };
+            return (score, state_node);
+        }
+
         let mut scores: Vec<f64> = Vec::with_capacity(actions.len());
         let mut children: Vec<DebugActionNode> = Vec::new();
         for action in actions.iter() {
@@ -323,5 +348,78 @@ fn generate_dot_recursive(
                 myself,
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::players::value_functions::baseline_value_function;
+    use rand::{rngs::StdRng, SeedableRng};
+
+    #[test]
+    fn minimizing_branch_samples_hidden_info_discard_instead_of_exhaustive_search() {
+        // Mirrors what nasty_notice_effect queues: the opponent choosing among several
+        // combinations of their own hidden hand. Exhaustively searching every combination
+        // would let the search see the opponent's real hand to compute a worst-case discard;
+        // it should sample one instead.
+        let mut state = State::default();
+        state.current_player = 0;
+        state.turn_count = 5; // skip the turn-0 initial-setup-phase branch in generate_possible_actions
+        let myself = 0;
+        let opponent = 1;
+
+        let choices = vec![
+            SimpleAction::DiscardOwnCards { cards: vec![] },
+            SimpleAction::DiscardOwnCards { cards: vec![] },
+            SimpleAction::DiscardOwnCards { cards: vec![] },
+            SimpleAction::DiscardOwnCards { cards: vec![] },
+        ];
+        state.move_generation_stack.push((opponent, choices));
+
+        let value_function: ValueFunction = Box::new(baseline_value_function);
+        let mut rng = StdRng::seed_from_u64(0);
+
+        let (_, node) = expectiminimax(&mut rng, &state, 2, myself, &value_function);
+
+        assert_eq!(
+            node.children.len(),
+            1,
+            "hidden-info discard choices should be sampled, not exhaustively searched"
+        );
+    }
+
+    #[test]
+    fn minimizing_branch_still_searches_public_info_choices_exhaustively() {
+        // Contrast case: bench-promotion choices (e.g. knock_back_attack) ARE public
+        // information, so this path must remain untouched -- exhaustive minimax, not sampling.
+        let mut state = State::default();
+        state.current_player = 0;
+        state.turn_count = 5; // skip the turn-0 initial-setup-phase branch in generate_possible_actions
+        let myself = 0;
+        let opponent = 1;
+
+        let choices = vec![
+            SimpleAction::Activate {
+                player: opponent,
+                in_play_idx: 1,
+            },
+            SimpleAction::Activate {
+                player: opponent,
+                in_play_idx: 2,
+            },
+        ];
+        state.move_generation_stack.push((opponent, choices));
+
+        let value_function: ValueFunction = Box::new(baseline_value_function);
+        let mut rng = StdRng::seed_from_u64(0);
+
+        let (_, node) = expectiminimax(&mut rng, &state, 2, myself, &value_function);
+
+        assert_eq!(
+            node.children.len(),
+            2,
+            "public-information choices should still be searched exhaustively"
+        );
     }
 }
