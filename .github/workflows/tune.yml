@@ -17,10 +17,10 @@ on:
         default: '3'
       opponent_params:
         description: 'Reference opponent params file'
-        default: 'tuned_params_v5.json'
+        default: 'tuned_params_v6.json'
       init_params:
         description: 'Params to seed the search from (blank = start from BASELINE, the old behavior)'
-        default: 'tuned_params_v5.json'
+        default: 'tuned_params_v6.json'
       seed_rotation:
         description: 'Rotate seeds every N generations (0 disables)'
         default: '5'
