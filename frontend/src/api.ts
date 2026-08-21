@@ -1,4 +1,4 @@
-import type { GameView, NewGameResponse } from "./types";
+import type { DeckInfo, GameView, NewGameResponse } from "./types";
 
 export interface NewGameOptions {
   deckHuman: string;
@@ -13,6 +13,11 @@ async function asJson<T>(resp: Response): Promise<T> {
     throw new Error(`${resp.status}: ${text}`);
   }
   return resp.json() as Promise<T>;
+}
+
+export async function listDecks(): Promise<DeckInfo[]> {
+  const resp = await fetch("/api/decks");
+  return asJson<DeckInfo[]>(resp);
 }
 
 export async function createGame(opts: NewGameOptions): Promise<NewGameResponse> {

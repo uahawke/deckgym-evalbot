@@ -10,6 +10,7 @@
 
 use serde::Serialize;
 use std::collections::HashMap;
+use std::fs;
 use std::sync::Mutex;
 use uuid::Uuid;
 
@@ -18,6 +19,66 @@ use crate::models::{Card, EnergyType, PlayedCard};
 use crate::players::{ExpectiMiniMaxPlayer, HumanPlayer, ValueFunctionParams};
 use crate::state::GameOutcome;
 use crate::{Deck, Game, State};
+
+/// Where a human player's deck choices are read from. Distinct from `decks/train`, which holds
+/// a tuning-only subset (see `decks/README.md`) -- players should see the whole curated set.
+const DECKS_DIR: &str = "example_decks";
+
+/// One deck a human player can pick, as offered by `GET /api/decks`.
+#[derive(Serialize)]
+pub struct DeckInfo {
+    /// Server-local path, as accepted by `NewGameRequest.deck_human`/`deck_ai`.
+    pub path: String,
+    /// Display name derived from the filename -- deck files carry no name of their own (just an
+    /// energy line and card ids), so this is a best-effort prettification, not curated data.
+    pub label: String,
+}
+
+/// Lists the decks available for a human to choose from, sorted by display label.
+pub fn list_decks() -> Result<Vec<DeckInfo>, String> {
+    let mut decks: Vec<DeckInfo> = fs::read_dir(DECKS_DIR)
+        .map_err(|e| format!("failed to read {DECKS_DIR}: {e}"))?
+        .filter_map(|entry| entry.ok())
+        .filter_map(|entry| {
+            let file_name = entry.file_name().to_string_lossy().into_owned();
+            let stem = file_name.strip_suffix(".txt")?.to_string();
+            Some(DeckInfo {
+                path: format!("{DECKS_DIR}/{file_name}"),
+                label: prettify_deck_name(&stem),
+            })
+        })
+        .collect();
+    decks.sort_by(|a, b| a.label.cmp(&b.label));
+    Ok(decks)
+}
+
+/// Turns a deck filename stem (e.g. `mewtwoex`, `giratina-darkrai`) into a display label (`Mewtwo
+/// ex`, `Giratina Darkrai`). Filenames separate words with `-`/`_` except for a trailing "ex"
+/// (as in the in-game "Mewtwo ex" card suffix), which this special-cases since it's otherwise
+/// glued directly onto the preceding word.
+fn prettify_deck_name(stem: &str) -> String {
+    let spaced = stem.replace(['-', '_'], " ");
+    let spaced = match spaced.strip_suffix("ex") {
+        Some(head) if !head.is_empty() && !head.ends_with(' ') => format!("{head} ex"),
+        _ => spaced,
+    };
+
+    spaced
+        .split_whitespace()
+        .map(|word| {
+            if word.eq_ignore_ascii_case("ex") {
+                "ex".to_string()
+            } else {
+                let mut chars = word.chars();
+                match chars.next() {
+                    Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+                    None => String::new(),
+                }
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
 
 /// A single in-progress game between a human and the AI.
 pub struct GameSession {

@@ -127,3 +127,8 @@ export interface GameView {
 export interface NewGameResponse extends GameView {
   game_id: string;
 }
+
+export interface DeckInfo {
+  path: string;
+  label: string;
+}

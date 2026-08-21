@@ -1,6 +1,7 @@
 //! Skeleton HTTP server letting a human play interactively against the tuned e2 AI.
 //!
 //! Endpoints:
+//!   GET  /api/decks            list decks available to choose from
 //!   POST /api/games            start a new game, returns { game_id, ...GameView }
 //!   GET  /api/games/:id        current state + legal actions
 //!   POST /api/games/:id/actions  { "index": N } -- apply one of the last-reported actions
@@ -18,7 +19,7 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use deckgym::web::{GameSession, GameView, SessionStore};
+use deckgym::web::{list_decks, DeckInfo, GameSession, GameView, SessionStore};
 use deckgym::Deck;
 use serde::Deserialize;
 use std::sync::Arc;
@@ -56,6 +57,12 @@ struct NewGameResponse {
 #[derive(Deserialize)]
 struct SubmitActionRequest {
     index: usize,
+}
+
+async fn get_decks() -> Result<Json<Vec<DeckInfo>>, (StatusCode, String)> {
+    list_decks()
+        .map(Json)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))
 }
 
 async fn create_game(
@@ -114,6 +121,7 @@ async fn main() {
     let store = Arc::new(SessionStore::default());
 
     let app = Router::new()
+        .route("/api/decks", get(get_decks))
         .route("/api/games", post(create_game))
         .route("/api/games/:id", get(get_game))
         .route("/api/games/:id/actions", post(submit_action))
