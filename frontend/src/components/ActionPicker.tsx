@@ -2,7 +2,7 @@ import type { ActionView } from "../types";
 import "./ActionPicker.css";
 
 // Rough grouping by label prefix, mirroring tui::app::action_priority_for_tui's categories.
-// The label comes from SimpleAction's Display impl on the Rust side -- this is a convenience
+// The label comes from SimpleAction::describe() on the Rust side -- this is a convenience
 // grouping, not a structured action type, so it's necessarily a bit heuristic.
 const GROUPS: { title: string; test: (label: string) => boolean }[] = [
   { title: "Place / Evolve", test: (l) => l.startsWith("Place") || l.startsWith("Evolve") },
@@ -13,7 +13,7 @@ const GROUPS: { title: string; test: (label: string) => boolean }[] = [
   },
   { title: "Attack", test: (l) => l.startsWith("Attack") },
   { title: "Retreat", test: (l) => l.startsWith("Retreat") },
-  { title: "End turn", test: (l) => l.startsWith("EndTurn") },
+  { title: "End turn", test: (l) => l.startsWith("End turn") },
 ];
 
 export function ActionPicker({

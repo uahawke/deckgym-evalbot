@@ -176,6 +176,204 @@ pub enum SimpleAction {
     Noop, // No operation, used to have the user say "no" to a question
 }
 
+impl SimpleAction {
+    /// Human-facing description, for a player-facing UI (the web frontend). Unlike `Display`
+    /// (a debug-oriented dump used by the TUI and logs), this resolves card/energy names and
+    /// board positions into plain English rather than printing the raw variant/field structure.
+    pub fn describe(&self) -> String {
+        fn slot(idx: usize) -> String {
+            if idx == 0 {
+                "Active".to_string()
+            } else {
+                format!("Bench {idx}")
+            }
+        }
+
+        match self {
+            SimpleAction::DrawCard { amount } => {
+                if *amount == 1 {
+                    "Draw a card".to_string()
+                } else {
+                    format!("Draw {amount} cards")
+                }
+            }
+            SimpleAction::Play { trainer_card } => format!("Play {}", trainer_card.name),
+            SimpleAction::Place(card, index) => {
+                format!("Place {} ({})", card.get_name(), slot(*index))
+            }
+            SimpleAction::Evolve {
+                evolution,
+                in_play_idx,
+                ..
+            } => format!("Evolve into {} ({})", evolution.get_name(), slot(*in_play_idx)),
+            SimpleAction::UseAbility { in_play_idx } => {
+                format!("Use ability ({})", slot(*in_play_idx))
+            }
+            SimpleAction::Attack(attack) => format!("Attack: {}", attack.title),
+            SimpleAction::Retreat(index) => format!("Retreat to {}", slot(*index)),
+            SimpleAction::EndTurn => "End turn".to_string(),
+            SimpleAction::Attach { attachments, .. } => {
+                let parts = attachments
+                    .iter()
+                    .map(|(amount, energy_type, in_play_idx)| {
+                        format!("{amount}x {energy_type} \u{2192} {}", slot(*in_play_idx))
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("Attach {parts}")
+            }
+            SimpleAction::MoveEnergy {
+                from_in_play_idx,
+                to_in_play_idx,
+                energy_type,
+                amount,
+            } => format!(
+                "Move {amount}x {energy_type} energy from {} to {}",
+                slot(*from_in_play_idx),
+                slot(*to_in_play_idx)
+            ),
+            SimpleAction::AttachTool {
+                in_play_idx,
+                tool_card,
+            } => format!(
+                "Attach {} to {}",
+                tool_card.get_name(),
+                slot(*in_play_idx)
+            ),
+            SimpleAction::Heal {
+                in_play_idx,
+                amount,
+                cure_status,
+            } => {
+                if *cure_status {
+                    format!("Heal {amount} and cure status ({})", slot(*in_play_idx))
+                } else {
+                    format!("Heal {amount} damage ({})", slot(*in_play_idx))
+                }
+            }
+            SimpleAction::HealAndDiscardEnergy {
+                in_play_idx,
+                heal_amount,
+                discard_energies,
+            } => {
+                let energies = discard_energies
+                    .iter()
+                    .map(|e| e.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!(
+                    "Heal {heal_amount} and discard {energies} energy ({})",
+                    slot(*in_play_idx)
+                )
+            }
+            SimpleAction::MoveAllDamage { from, to } => {
+                format!("Move all damage from {} to {}", slot(*from), slot(*to))
+            }
+            SimpleAction::ApplyDamage { .. } => "Resolve damage".to_string(),
+            SimpleAction::ScheduleDelayedSpotDamage {
+                target_in_play_idx,
+                amount,
+                ..
+            } => format!(
+                "Schedule {amount} delayed damage to {}",
+                slot(*target_in_play_idx)
+            ),
+            SimpleAction::Activate { in_play_idx, .. } => {
+                format!("Move {} to Active", slot(*in_play_idx))
+            }
+            SimpleAction::CommunicatePokemon { hand_pokemon } => format!(
+                "Trade {} for a random Pokémon from your deck",
+                hand_pokemon.get_name()
+            ),
+            SimpleAction::ShufflePokemonIntoDeck { hand_pokemon } => {
+                let names = hand_pokemon
+                    .iter()
+                    .map(|c| c.get_name())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("Shuffle {names} into your deck")
+            }
+            SimpleAction::ShuffleOwnCardsIntoDeck { cards } => {
+                format!("Shuffle {} card(s) into your deck and draw", cards.len())
+            }
+            SimpleAction::SwitchHandCardForRandomTool { hand_card } => format!(
+                "Trade {} for a random Tool from your deck",
+                hand_card.get_name()
+            ),
+            SimpleAction::ShuffleOpponentSupporter { supporter_card } => format!(
+                "Shuffle opponent's {} into their deck",
+                supporter_card.get_name()
+            ),
+            SimpleAction::DiscardOpponentSupporter { supporter_card } => {
+                format!("Discard opponent's {}", supporter_card.get_name())
+            }
+            SimpleAction::DiscardOwnCards { cards } => {
+                let names = cards
+                    .iter()
+                    .map(|c| c.get_name())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("Discard {names}")
+            }
+            SimpleAction::AttachFromDiscard {
+                in_play_idx,
+                num_random_energies,
+            } => format!(
+                "Attach {num_random_energies} random energy from discard to {}",
+                slot(*in_play_idx)
+            ),
+            SimpleAction::AttachTypedFromDiscard {
+                in_play_idx,
+                energy_type,
+                count,
+            } => format!(
+                "Attach {count}x {energy_type} energy from discard to {}",
+                slot(*in_play_idx)
+            ),
+            SimpleAction::SadaAttach { assignments } => {
+                let parts = assignments
+                    .iter()
+                    .map(|(energy_type, idx)| format!("{energy_type} \u{2192} {}", slot(*idx)))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("Attach energy from discard: {parts}")
+            }
+            SimpleAction::ApplyEeveeBagDamageBoost => {
+                "Boost damage for Eevee evolutions this turn".to_string()
+            }
+            SimpleAction::HealAllEeveeEvolutions => "Heal all Eevee evolutions".to_string(),
+            SimpleAction::DiscardFossil { in_play_idx } => {
+                format!("Discard Fossil ({})", slot(*in_play_idx))
+            }
+            SimpleAction::DiscardOwnBenchedThenDamage { in_play_idx, damage } => {
+                format!("Discard {} to deal {damage} damage", slot(*in_play_idx))
+            }
+            SimpleAction::UseStadium => "Use stadium".to_string(),
+            SimpleAction::ReturnPokemonToHand { in_play_idx } => {
+                format!("Return {} to hand", slot(*in_play_idx))
+            }
+            SimpleAction::ShuffleInPlayPokemonIntoDeck { in_play_idx } => {
+                format!("Shuffle {} into deck", slot(*in_play_idx))
+            }
+            SimpleAction::DiscardToolFromPokemon { in_play_idx, .. } => {
+                format!("Discard tool from {}", slot(*in_play_idx))
+            }
+            SimpleAction::DiscardActiveStadium => "Discard the active stadium".to_string(),
+            SimpleAction::DiscardRandomOpponentActiveEnergy => {
+                "Discard a random Energy from opponent's Active".to_string()
+            }
+            SimpleAction::MoveRandomOpponentEnergyToActive { from_in_play_idx } => format!(
+                "Move a random Energy from opponent's {} to their Active",
+                slot(*from_in_play_idx)
+            ),
+            SimpleAction::ApplyStatusToOpponentActive { condition } => {
+                format!("Apply {condition:?} to opponent's Active")
+            }
+            SimpleAction::Noop => "Pass".to_string(),
+        }
+    }
+}
+
 impl fmt::Display for SimpleAction {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

@@ -128,7 +128,7 @@ impl GameSession {
                 .map(|(index, action)| ActionView {
                     index,
                     actor: action.actor,
-                    label: action.action.to_string(),
+                    label: action.action.describe(),
                 })
                 .collect(),
             state: PlayerStateView::from_state(&state, self.human_seat),
