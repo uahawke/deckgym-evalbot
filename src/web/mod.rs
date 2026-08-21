@@ -14,7 +14,9 @@ use std::sync::Mutex;
 use uuid::Uuid;
 
 use crate::actions::Action;
+use crate::models::{Card, EnergyType, PlayedCard};
 use crate::players::{ExpectiMiniMaxPlayer, HumanPlayer, ValueFunctionParams};
+use crate::state::GameOutcome;
 use crate::{Deck, Game, State};
 
 /// A single in-progress game between a human and the AI.
@@ -129,14 +131,12 @@ impl GameSession {
                     label: action.action.to_string(),
                 })
                 .collect(),
-            state,
+            state: PlayerStateView::from_state(&state, self.human_seat),
         }
     }
 }
 
-/// What the frontend gets back after starting a game or submitting an action. `state` is the
-/// full internal State (already Serialize) -- a real frontend will likely want a slimmer,
-/// purpose-built view, but exposing the whole thing is enough to build against for now.
+/// What the frontend gets back after starting a game or submitting an action.
 #[derive(Serialize)]
 pub struct GameView {
     pub turn_count: u8,
@@ -144,10 +144,10 @@ pub struct GameView {
     pub human_seat: usize,
     pub is_human_turn: bool,
     pub is_game_over: bool,
-    pub winner: Option<crate::state::GameOutcome>,
+    pub winner: Option<GameOutcome>,
     pub points: [u8; 2],
     pub possible_actions: Vec<ActionView>,
-    pub state: State,
+    pub state: PlayerStateView,
 }
 
 #[derive(Serialize)]
@@ -155,6 +155,82 @@ pub struct ActionView {
     pub index: usize,
     pub actor: usize,
     pub label: String,
+}
+
+/// `State` filtered to what `viewer` is actually allowed to see. The raw `State` holds both
+/// players' full hands and deck contents (it has to, internally, to simulate the game) -- serializing
+/// it as-is over HTTP would hand the human's browser the AI's hidden hand and deck order, readable
+/// from the network tab regardless of anything the AI's search does. Everything else in TCG Pocket
+/// (bench/active Pokemon, discard piles, points, stadium) is public to both players and passed
+/// through unfiltered.
+#[derive(Serialize)]
+pub struct PlayerStateView {
+    pub winner: Option<GameOutcome>,
+    pub points: [u8; 2],
+    pub turn_count: u8,
+    pub current_player: usize,
+    /// The viewer's own energy zone, in full.
+    pub my_energy_zone: EnergyZoneView,
+    /// The opponent's energy zone. `next` is deliberately omitted here -- unconfirmed whether
+    /// TCG Pocket shows an opponent's upcoming energy type or only your own; defaulting to
+    /// hidden (the safe direction) until that's checked against the real game's rules.
+    pub opponent_energy_current: Option<EnergyType>,
+    /// The viewer's own hand, in full.
+    pub my_hand: Vec<Card>,
+    pub opponent_hand_size: usize,
+    /// [my deck size, opponent deck size] -- card counts only; nobody sees deck contents or
+    /// order, including the deck's own owner.
+    pub deck_sizes: [usize; 2],
+    pub discard_piles: [Vec<Card>; 2],
+    pub discard_energies: [Vec<EnergyType>; 2],
+    /// [my in-play Pokemon, opponent's in-play Pokemon] -- index 0 of each is the active, 1..4
+    /// the bench. Always public in TCG Pocket.
+    pub in_play_pokemon: [[Option<PlayedCard>; 4]; 2],
+    pub active_stadium: Option<Card>,
+    pub active_stadium_owner: Option<usize>,
+}
+
+#[derive(Serialize)]
+pub struct EnergyZoneView {
+    pub current: Option<EnergyType>,
+    pub next: Option<EnergyType>,
+}
+
+impl PlayerStateView {
+    fn from_state(state: &State, viewer: usize) -> Self {
+        let opponent = (viewer + 1) % 2;
+        PlayerStateView {
+            winner: state.winner,
+            points: state.points,
+            turn_count: state.turn_count,
+            current_player: state.current_player,
+            my_energy_zone: EnergyZoneView {
+                current: state.energy_zone[viewer].current,
+                next: state.energy_zone[viewer].next,
+            },
+            opponent_energy_current: state.energy_zone[opponent].current,
+            my_hand: state.hands[viewer].clone(),
+            opponent_hand_size: state.hands[opponent].len(),
+            deck_sizes: [
+                state.decks[viewer].cards.len(),
+                state.decks[opponent].cards.len(),
+            ],
+            discard_piles: [
+                state.discard_piles[viewer].clone(),
+                state.discard_piles[opponent].clone(),
+            ],
+            discard_energies: [
+                state.discard_energies[viewer].clone(),
+                state.discard_energies[opponent].clone(),
+            ],
+            in_play_pokemon: [
+                state.in_play_pokemon[viewer].clone(),
+                state.in_play_pokemon[opponent].clone(),
+            ],
+            active_stadium: state.active_stadium.clone(),
+            active_stadium_owner: state.active_stadium_owner,
+        }
+    }
 }
 
 /// In-memory session store, keyed by game id. Single-process, lost on restart -- fine for a
