@@ -1,0 +1,48 @@
+.app {
+  max-width: 900px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.app-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 14px;
+  border-bottom: 1px solid #333;
+  font-size: 13px;
+  color: #ccc;
+}
+
+.app-restart {
+  margin-left: auto;
+  background: transparent;
+  color: #90caf9;
+  border: 1px solid #555;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.app-error {
+  color: #ef5350;
+  padding: 8px 14px;
+  font-size: 13px;
+}
+
+.app-thinking {
+  padding: 8px 14px;
+  color: #ffd54f;
+  font-size: 13px;
+}
+
+.game-over-banner {
+  text-align: center;
+  padding: 20px;
+  font-size: 20px;
+  font-weight: 700;
+  color: #ffd54f;
+}

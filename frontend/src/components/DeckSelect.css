@@ -1,0 +1,59 @@
+.deck-select {
+  max-width: 360px;
+  margin: 60px auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  color: #eee;
+  font-family: inherit;
+}
+
+.deck-select h1 {
+  font-size: 22px;
+  margin: 0;
+}
+
+.deck-select-sub {
+  color: #aaa;
+  font-size: 13px;
+  margin: 0 0 6px;
+}
+
+.deck-select-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: #ccc;
+}
+
+.deck-select-field select {
+  background: #2c2c2c;
+  color: #eee;
+  border: 1px solid #555;
+  border-radius: 6px;
+  padding: 8px;
+  font-size: 14px;
+}
+
+.deck-select-start {
+  margin-top: 8px;
+  background: #43a047;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  padding: 10px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.deck-select-start:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.deck-select-error {
+  color: #ef5350;
+  font-size: 13px;
+}
