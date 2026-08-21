@@ -4,6 +4,7 @@ export interface NewGameOptions {
   deckHuman: string;
   deckAi: string;
   humanSeat: number;
+  aiDepth: number;
   seed?: number;
 }
 
@@ -28,6 +29,7 @@ export async function createGame(opts: NewGameOptions): Promise<NewGameResponse>
       deck_human: opts.deckHuman,
       deck_ai: opts.deckAi,
       human_seat: opts.humanSeat,
+      ai_depth: opts.aiDepth,
       seed: opts.seed,
     }),
   });

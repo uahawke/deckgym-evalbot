@@ -27,6 +27,14 @@ use uuid::Uuid;
 
 const DEFAULT_AI_PARAMS: &str = "tuned_params_v6.json";
 const DEFAULT_AI_DEPTH: usize = 2; // e2
+/// "Hard mode": e3 (depth-3 search). ~3.4x slower per benchmarked game than e2, but not tuned
+/// separately -- reuses `tuned_params_v6.json`, since depth alone was the dominant factor in past
+/// benchmarking (see the tune-bot skill's README for the e2/e3 comparison).
+const HARD_AI_DEPTH: usize = 3; // e3
+
+fn default_ai_depth() -> usize {
+    DEFAULT_AI_DEPTH
+}
 
 #[derive(Deserialize)]
 struct NewGameRequest {
@@ -36,6 +44,8 @@ struct NewGameRequest {
     deck_ai: String,
     #[serde(default)]
     human_seat: usize,
+    #[serde(default = "default_ai_depth")]
+    ai_depth: usize,
     seed: Option<u64>,
 }
 
@@ -73,13 +83,22 @@ async fn create_game(
         .map_err(|e| (StatusCode::BAD_REQUEST, format!("deck_human: {e}")))?;
     let deck_ai = Deck::from_file(&req.deck_ai)
         .map_err(|e| (StatusCode::BAD_REQUEST, format!("deck_ai: {e}")))?;
+    if req.ai_depth != DEFAULT_AI_DEPTH && req.ai_depth != HARD_AI_DEPTH {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!(
+                "ai_depth: only {DEFAULT_AI_DEPTH} (normal) or {HARD_AI_DEPTH} (hard) are supported, got {}",
+                req.ai_depth
+            ),
+        ));
+    }
     let seed = req.seed.unwrap_or_else(rand::random::<u64>);
 
     let session = GameSession::new(
         deck_human,
         deck_ai,
         req.human_seat,
-        DEFAULT_AI_DEPTH,
+        req.ai_depth,
         DEFAULT_AI_PARAMS,
         seed,
     )

@@ -116,6 +116,7 @@ export interface GameView {
   turn_count: number;
   current_actor: number;
   human_seat: number;
+  ai_depth: number;
   is_human_turn: boolean;
   is_game_over: boolean;
   winner: GameOutcome | null;

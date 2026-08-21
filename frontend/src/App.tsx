@@ -18,11 +18,11 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function handleStart(deckHuman: string, deckAi: string, humanSeat: number) {
+  async function handleStart(deckHuman: string, deckAi: string, humanSeat: number, aiDepth: number) {
     setBusy(true);
     setError(null);
     try {
-      const resp = await createGame({ deckHuman, deckAi, humanSeat, seed: undefined });
+      const resp = await createGame({ deckHuman, deckAi, humanSeat, aiDepth, seed: undefined });
       setGameId(resp.game_id);
       setGame(resp);
     } catch (e) {
@@ -61,6 +61,7 @@ export default function App() {
       <header className="app-header">
         <span>Turn {game.turn_count}</span>
         <span>{game.is_game_over ? "Game over" : game.is_human_turn ? "Your turn" : "AI's turn"}</span>
+        <span>{game.ai_depth === 3 ? "Hard (e3)" : "Normal (e2)"}</span>
         <button className="app-restart" onClick={handleRestart}>
           New game
         </button>

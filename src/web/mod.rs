@@ -85,6 +85,9 @@ pub struct GameSession {
     game: Game<'static>,
     /// Which seat (0 or 1) the human occupies. The other seat always auto-plays via `play_tick`.
     human_seat: usize,
+    /// The AI's search depth (2 for e2, 3 for e3/"hard mode"), surfaced back to the frontend so
+    /// it can show which difficulty is actually running.
+    ai_depth: usize,
     current_actor: usize,
     possible_actions: Vec<Action>,
 }
@@ -128,6 +131,7 @@ impl GameSession {
         let mut session = GameSession {
             game,
             human_seat,
+            ai_depth,
             current_actor: 0,
             possible_actions: vec![],
         };
@@ -178,6 +182,7 @@ impl GameSession {
             turn_count: state.turn_count,
             current_actor: self.current_actor,
             human_seat: self.human_seat,
+            ai_depth: self.ai_depth,
             is_human_turn: !self.game.is_game_over() && self.current_actor == self.human_seat,
             is_game_over: self.game.is_game_over(),
             winner: state.winner,
@@ -203,6 +208,7 @@ pub struct GameView {
     pub turn_count: u8,
     pub current_actor: usize,
     pub human_seat: usize,
+    pub ai_depth: usize,
     pub is_human_turn: bool,
     pub is_game_over: bool,
     pub winner: Option<GameOutcome>,

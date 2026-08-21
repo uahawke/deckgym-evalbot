@@ -8,7 +8,7 @@ export function DeckSelect({
   loading,
   error,
 }: {
-  onStart: (deckHuman: string, deckAi: string, humanSeat: number) => void;
+  onStart: (deckHuman: string, deckAi: string, humanSeat: number, aiDepth: number) => void;
   loading: boolean;
   error: string | null;
 }) {
@@ -17,6 +17,7 @@ export function DeckSelect({
   const [deckHuman, setDeckHuman] = useState("");
   const [deckAi, setDeckAi] = useState("");
   const [humanSeat, setHumanSeat] = useState(0);
+  const [aiDepth, setAiDepth] = useState(2);
 
   useEffect(() => {
     listDecks()
@@ -32,8 +33,8 @@ export function DeckSelect({
     <div className="deck-select">
       <h1>Play against the AI</h1>
       <p className="deck-select-sub">
-        The opponent is <strong>e2</strong> (depth-2 search), tuned via {" "}
-        <code>tuned_params_v6.json</code>.
+        The opponent is <strong>{aiDepth === 3 ? "e3" : "e2"}</strong> (depth-{aiDepth} search),
+        tuned via <code>tuned_params_v6.json</code>.
       </p>
 
       {decksError && <div className="deck-select-error">Failed to load decks: {decksError}</div>}
@@ -69,6 +70,14 @@ export function DeckSelect({
               <option value={1}>AI goes first</option>
             </select>
           </label>
+
+          <label className="deck-select-field">
+            Difficulty
+            <select value={aiDepth} onChange={(e) => setAiDepth(Number(e.target.value))}>
+              <option value={2}>Normal (e2)</option>
+              <option value={3}>Hard (e3) -- slower, stronger search</option>
+            </select>
+          </label>
         </>
       )}
 
@@ -77,7 +86,7 @@ export function DeckSelect({
       <button
         className="deck-select-start"
         disabled={loading || !deckHuman || !deckAi}
-        onClick={() => onStart(deckHuman, deckAi, humanSeat)}
+        onClick={() => onStart(deckHuman, deckAi, humanSeat, aiDepth)}
       >
         {loading ? "Starting..." : decks ? "Start game" : "Loading decks..."}
       </button>
