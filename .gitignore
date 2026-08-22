@@ -1,5 +1,6 @@
 /target
 /sessions
+/game_logs
 .venv
 .DS_Store
 

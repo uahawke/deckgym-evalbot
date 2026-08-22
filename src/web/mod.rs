@@ -360,6 +360,31 @@ impl GameSession {
             log: self.log.clone(),
         }
     }
+
+    pub fn is_game_over(&self) -> bool {
+        self.game.is_game_over()
+    }
+
+    /// A durable record of this game for archival, if it's actually finished -- see
+    /// `GAME_LOGS_DIR`'s doc comment for what it's for.
+    fn to_log_record(&self, id: Uuid) -> Option<GameLogRecord> {
+        if !self.is_game_over() {
+            return None;
+        }
+        let state = self.game.get_state_clone();
+        Some(GameLogRecord {
+            game_id: id,
+            finished_at: chrono::Utc::now().to_rfc3339(),
+            human_seat: self.human_seat,
+            ai_depth: self.ai_depth,
+            deck_human: self.deck_human.clone(),
+            deck_ai: self.deck_ai.clone(),
+            winner: state.winner,
+            points: state.points,
+            turn_count: state.turn_count,
+            log: self.log.clone(),
+        })
+    }
 }
 
 /// Everything needed to rebuild a `GameSession` after a restart. Doesn't include
@@ -498,6 +523,32 @@ impl PlayerStateView {
 /// it -- not done here), but games now survive a restart of this one.
 const SESSIONS_DIR: &str = "sessions";
 
+/// Where finished games are archived permanently, one JSON file per game keyed by its id.
+/// Distinct from `SESSIONS_DIR`, which is purely a resume cache holding whatever the latest state
+/// is -- this is an append-only record kept around after the game (and its `SESSIONS_DIR` entry)
+/// are otherwise done being useful. The intent is mining player-submitted decks that see real
+/// play (and how they fared) to fold into `decks/train`/`example_decks/` for future tuning
+/// gauntlets -- not itself a tuning mechanism. CMA-ES tunes by playing *new* games with candidate
+/// coefficients, not by fitting to historical transcripts, so nothing here is consumed
+/// automatically; a human decides what's worth promoting.
+const GAME_LOGS_DIR: &str = "game_logs";
+
+/// A durable record of one finished game. Everything needed to identify which decks played each
+/// other and how it went, plus the full turn-by-turn log for closer review.
+#[derive(Serialize)]
+struct GameLogRecord {
+    game_id: Uuid,
+    finished_at: String,
+    human_seat: usize,
+    ai_depth: usize,
+    deck_human: DeckSource,
+    deck_ai: DeckSource,
+    winner: Option<GameOutcome>,
+    points: [u8; 2],
+    turn_count: u8,
+    log: Vec<LogEntry>,
+}
+
 /// In-memory session store, keyed by game id, backed by on-disk snapshots in `SESSIONS_DIR` so
 /// in-progress games survive a server restart.
 pub struct SessionStore {
@@ -544,6 +595,7 @@ impl SessionStore {
     pub fn insert(&self, session: GameSession) -> Uuid {
         let id = Uuid::new_v4();
         persist(id, &session);
+        archive_if_finished(id, &session);
         self.sessions.lock().unwrap().insert(id, session);
         id
     }
@@ -553,6 +605,7 @@ impl SessionStore {
         let session = sessions.get_mut(&id)?;
         let result = f(session);
         persist(id, session);
+        archive_if_finished(id, session);
         Some(result)
     }
 }
@@ -571,5 +624,34 @@ fn persist(id: Uuid, session: &GameSession) {
             }
         }
         Err(e) => log::warn!("failed to serialize session {id}: {e}"),
+    }
+}
+
+/// Writes a durable record of a finished game to `GAME_LOGS_DIR` (see its doc comment), the first
+/// time this is called after the game is over -- a no-op if it isn't over yet, or if a record
+/// already exists. That existence check matters, not just as an optimization: this is called
+/// after every mutation, including plain GETs of an already-finished game, and `to_log_record`
+/// stamps `finished_at` with the current time on every call, so writing unconditionally would
+/// make that field drift to "whenever this was last viewed" instead of when the game actually
+/// ended.
+fn archive_if_finished(id: Uuid, session: &GameSession) {
+    let path = format!("{GAME_LOGS_DIR}/{id}.json");
+    if fs::metadata(&path).is_ok() {
+        return;
+    }
+    let Some(record) = session.to_log_record(id) else {
+        return;
+    };
+    if let Err(e) = fs::create_dir_all(GAME_LOGS_DIR) {
+        log::warn!("failed to create {GAME_LOGS_DIR}: {e}");
+        return;
+    }
+    match serde_json::to_string(&record) {
+        Ok(json) => {
+            if let Err(e) = fs::write(&path, json) {
+                log::warn!("failed to archive game {id}: {e}");
+            }
+        }
+        Err(e) => log::warn!("failed to serialize game log {id}: {e}"),
     }
 }
