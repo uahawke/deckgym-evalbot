@@ -2,6 +2,8 @@
 //!
 //! Endpoints:
 //!   GET  /api/decks            list decks available to choose from
+//!   GET  /api/cards            list every card, for a deck-builder UI
+//!   POST /api/decks/validate   { "list": "..." } -- check a decklist without starting a game
 //!   POST /api/games            start a new game, returns { game_id, ...GameView }
 //!   GET  /api/games/:id        current state + legal actions
 //!   POST /api/games/:id/actions  { "index": N } -- apply one of the last-reported actions
@@ -19,7 +21,11 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use deckgym::web::{list_decks, DeckInfo, GameSession, GameView, SessionStore};
+use deckgym::models::Card;
+use deckgym::web::{
+    list_cards, list_decks, validate_deck_list, DeckInfo, DeckSource, DeckSummary, GameSession,
+    GameView, SessionStore,
+};
 use serde::Deserialize;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -35,12 +41,18 @@ fn default_ai_depth() -> usize {
     DEFAULT_AI_DEPTH
 }
 
+const DEFAULT_DECK_PATH: &str = "example_decks/mewtwoex.txt";
+
 #[derive(Deserialize)]
 struct NewGameRequest {
-    #[serde(default = "default_human_deck")]
-    deck_human: String,
-    #[serde(default = "default_ai_deck")]
-    deck_ai: String,
+    /// Path into `example_decks/`, as offered by `GET /api/decks`. Ignored if `deck_human_list`
+    /// is set; defaults to `DEFAULT_DECK_PATH` if neither is.
+    deck_human: Option<String>,
+    /// A player-submitted decklist, in the same text format as a deck file (an `Energy:` line
+    /// plus `<count> <card id>` lines). Takes precedence over `deck_human` when set.
+    deck_human_list: Option<String>,
+    deck_ai: Option<String>,
+    deck_ai_list: Option<String>,
     #[serde(default)]
     human_seat: usize,
     #[serde(default = "default_ai_depth")]
@@ -48,12 +60,13 @@ struct NewGameRequest {
     seed: Option<u64>,
 }
 
-fn default_human_deck() -> String {
-    "example_decks/mewtwoex.txt".to_string()
-}
-
-fn default_ai_deck() -> String {
-    "example_decks/mewtwoex.txt".to_string()
+/// Picks the deck source a request specified for one side: an inline decklist if given, else the
+/// named path, else the default curated deck.
+fn deck_source(path: Option<String>, list: Option<String>) -> DeckSource {
+    match list {
+        Some(text) => DeckSource::List(text),
+        None => DeckSource::Path(path.unwrap_or_else(|| DEFAULT_DECK_PATH.to_string())),
+    }
 }
 
 #[derive(serde::Serialize)]
@@ -74,6 +87,23 @@ async fn get_decks() -> Result<Json<Vec<DeckInfo>>, (StatusCode, String)> {
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))
 }
 
+async fn get_cards() -> Json<Vec<Card>> {
+    Json(list_cards())
+}
+
+#[derive(Deserialize)]
+struct ValidateDeckRequest {
+    list: String,
+}
+
+async fn validate_deck(
+    Json(req): Json<ValidateDeckRequest>,
+) -> Result<Json<DeckSummary>, (StatusCode, String)> {
+    validate_deck_list(&req.list)
+        .map(Json)
+        .map_err(|e| (StatusCode::BAD_REQUEST, e))
+}
+
 async fn create_game(
     AxumState(store): AxumState<Arc<SessionStore>>,
     Json(req): Json<NewGameRequest>,
@@ -88,10 +118,12 @@ async fn create_game(
         ));
     }
     let seed = req.seed.unwrap_or_else(rand::random::<u64>);
+    let deck_human = deck_source(req.deck_human, req.deck_human_list);
+    let deck_ai = deck_source(req.deck_ai, req.deck_ai_list);
 
     let session = GameSession::new(
-        &req.deck_human,
-        &req.deck_ai,
+        deck_human,
+        deck_ai,
         req.human_seat,
         req.ai_depth,
         DEFAULT_AI_PARAMS,
@@ -136,6 +168,8 @@ async fn main() {
 
     let app = Router::new()
         .route("/api/decks", get(get_decks))
+        .route("/api/cards", get(get_cards))
+        .route("/api/decks/validate", post(validate_deck))
         .route("/api/games", post(create_game))
         .route("/api/games/:id", get(get_game))
         .route("/api/games/:id/actions", post(submit_action))

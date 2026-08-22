@@ -142,3 +142,12 @@ export interface DeckInfo {
   path: string;
   label: string;
 }
+
+export interface DeckSummary {
+  card_count: number;
+  energy_types: EnergyType[];
+}
+
+/** Which deck a player picked for one seat: a curated preset (by path) or a decklist they built
+ * themselves (the same "<count> <card id>" text format as a deck file). */
+export type DeckChoice = { path: string } | { list: string; summary: DeckSummary };

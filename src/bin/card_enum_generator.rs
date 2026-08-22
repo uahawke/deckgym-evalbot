@@ -152,6 +152,12 @@ fn print_database(card_map: &IndexMap<String, Card>) {
     println!("        .unwrap_or_else(|| panic!(\"Missing generated card for {{:?}}\", id))");
     println!("        .clone()");
     println!("}}");
+    println!();
+    println!("/// Every card in the database, for a UI that needs to browse/search the full set");
+    println!("/// (e.g. a deck builder) rather than look one up by id.");
+    println!("pub fn all_cards() -> Vec<Card> {{");
+    println!("    DATABASE.values().cloned().collect()");
+    println!("}}");
 }
 
 fn print_card_insert(enum_name: &str, card: &Card) {

@@ -57,3 +57,35 @@
   color: #ef5350;
   font-size: 13px;
 }
+
+.deck-select-build-link {
+  align-self: flex-start;
+  background: transparent;
+  color: #90caf9;
+  border: none;
+  padding: 0;
+  font-size: 12px;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.deck-select-custom-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.deck-select-custom-summary span {
+  color: #eee;
+}
+
+.deck-select-custom-summary button {
+  background: transparent;
+  color: #90caf9;
+  border: 1px solid #555;
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}

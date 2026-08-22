@@ -1,11 +1,15 @@
-import type { DeckInfo, GameView, NewGameResponse } from "./types";
+import type { Card, DeckChoice, DeckInfo, DeckSummary, GameView, NewGameResponse } from "./types";
 
 export interface NewGameOptions {
-  deckHuman: string;
-  deckAi: string;
+  deckHuman: DeckChoice;
+  deckAi: DeckChoice;
   humanSeat: number;
   aiDepth: number;
   seed?: number;
+}
+
+function deckFields(choice: DeckChoice, pathKey: string, listKey: string): Record<string, string> {
+  return "list" in choice ? { [listKey]: choice.list } : { [pathKey]: choice.path };
 }
 
 async function asJson<T>(resp: Response): Promise<T> {
@@ -21,13 +25,27 @@ export async function listDecks(): Promise<DeckInfo[]> {
   return asJson<DeckInfo[]>(resp);
 }
 
+export async function listCards(): Promise<Card[]> {
+  const resp = await fetch("/api/cards");
+  return asJson<Card[]>(resp);
+}
+
+export async function validateDeck(list: string): Promise<DeckSummary> {
+  const resp = await fetch("/api/decks/validate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ list }),
+  });
+  return asJson<DeckSummary>(resp);
+}
+
 export async function createGame(opts: NewGameOptions): Promise<NewGameResponse> {
   const resp = await fetch("/api/games", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      deck_human: opts.deckHuman,
-      deck_ai: opts.deckAi,
+      ...deckFields(opts.deckHuman, "deck_human", "deck_human_list"),
+      ...deckFields(opts.deckAi, "deck_ai", "deck_ai_list"),
       human_seat: opts.humanSeat,
       ai_depth: opts.aiDepth,
       seed: opts.seed,

@@ -83809,3 +83809,9 @@ pub fn get_card_by_enum(id: CardId) -> Card {
         .unwrap_or_else(|| panic!("Missing generated card for {:?}", id))
         .clone()
 }
+
+/// Every card in the database, for a UI that needs to browse/search the full set
+/// (e.g. a deck builder) rather than look one up by id.
+pub fn all_cards() -> Vec<Card> {
+    DATABASE.values().cloned().collect()
+}

@@ -80,17 +80,75 @@ fn prettify_deck_name(stem: &str) -> String {
         .join(" ")
 }
 
+/// Lists every card in the database, for a deck-builder UI to search/browse -- not just the ones
+/// in a particular deck. Sorted by id for a stable, deterministic response.
+pub fn list_cards() -> Vec<Card> {
+    let mut cards = crate::database::all_cards();
+    cards.sort_by_key(|a| a.get_id());
+    cards
+}
+
+/// Where a `GameSession`'s deck comes from: a curated file (`example_decks/*.txt`) or a
+/// player-submitted decklist in the same text format, just not backed by a file. An enum rather
+/// than two optional fields so a session remembers exactly one source per side, and persistence /
+/// reconstruction has a single code path regardless of which kind it is.
+#[derive(Serialize, Deserialize, Clone)]
+pub enum DeckSource {
+    Path(String),
+    List(String),
+}
+
+impl DeckSource {
+    /// Parses and validates the deck this source points to. Validity (20 cards, at least one
+    /// Basic, at most 2 copies of any card, selectable energy types) wasn't previously checked
+    /// for path-based decks either -- worth enforcing uniformly now that a submitted decklist
+    /// can't be trusted to already be legal the way a curated `example_decks/` file is.
+    fn load(&self) -> Result<Deck, String> {
+        let deck = match self {
+            DeckSource::Path(path) => Deck::from_file(path)?,
+            DeckSource::List(text) => Deck::from_string(text)?,
+        };
+        if !deck.is_valid() {
+            return Err(
+                "deck is not legal: needs exactly 20 cards, at least 1 Basic Pokémon, at most \
+                 2 copies of any card, and at least one selectable Energy type"
+                    .to_string(),
+            );
+        }
+        Ok(deck)
+    }
+}
+
+/// Summary of a validated decklist, for a deck-builder UI to confirm before starting a game.
+#[derive(Serialize)]
+pub struct DeckSummary {
+    pub card_count: usize,
+    pub energy_types: Vec<EnergyType>,
+}
+
+/// Validates a player-submitted decklist (the same text format as a deck file) without starting
+/// a game, so the frontend can give real-time legality feedback while building a deck.
+pub fn validate_deck_list(text: &str) -> Result<DeckSummary, String> {
+    let deck = DeckSource::List(text.to_string()).load()?;
+    Ok(DeckSummary {
+        card_count: deck.cards.len(),
+        energy_types: deck.energy_types.clone(),
+    })
+}
+
 /// Builds the two `Player` trait objects a `GameSession` drives -- shared between starting a
 /// fresh game (`GameSession::new`) and rebuilding one from a persisted snapshot
 /// (`GameSession::from_persisted`), since a `Box<dyn Player>` (the AI's holds a closure) can't be
 /// serialized and has to be reconstructed from its deck + params path either way.
 fn build_players(
-    deck_human: Deck,
-    deck_ai: Deck,
+    deck_human: &DeckSource,
+    deck_ai: &DeckSource,
     human_seat: usize,
     ai_depth: usize,
     ai_params_path: &str,
 ) -> Result<Vec<Box<dyn crate::players::Player>>, String> {
+    let deck_human = deck_human.load().map_err(|e| format!("deck_human: {e}"))?;
+    let deck_ai = deck_ai.load().map_err(|e| format!("deck_ai: {e}"))?;
     let ai_params = ValueFunctionParams::from_file(ai_params_path)?;
     let ai_player: Box<ExpectiMiniMaxPlayer> = Box::new(ExpectiMiniMaxPlayer {
         deck: deck_ai,
@@ -125,8 +183,8 @@ pub struct GameSession {
     log: Vec<LogEntry>,
     // The rest of these fields exist only so `to_persisted` can rebuild an equivalent session
     // (players, value function) after a server restart -- see `PersistedSession`.
-    deck_human_path: String,
-    deck_ai_path: String,
+    deck_human: DeckSource,
+    deck_ai: DeckSource,
     ai_params_path: String,
     seed: u64,
 }
@@ -135,8 +193,8 @@ impl GameSession {
     /// Starts a new game. `ai_params_path` is the champion coefficients file for the AI's value
     /// function (e.g. `tuned_params_v6.json`); `ai_depth` is the search depth (2 for e2).
     pub fn new(
-        deck_human_path: &str,
-        deck_ai_path: &str,
+        deck_human: DeckSource,
+        deck_ai: DeckSource,
         human_seat: usize,
         ai_depth: usize,
         ai_params_path: &str,
@@ -145,9 +203,7 @@ impl GameSession {
         if human_seat > 1 {
             return Err(format!("human_seat must be 0 or 1, got {human_seat}"));
         }
-        let deck_human = Deck::from_file(deck_human_path).map_err(|e| format!("deck_human: {e}"))?;
-        let deck_ai = Deck::from_file(deck_ai_path).map_err(|e| format!("deck_ai: {e}"))?;
-        let players = build_players(deck_human, deck_ai, human_seat, ai_depth, ai_params_path)?;
+        let players = build_players(&deck_human, &deck_ai, human_seat, ai_depth, ai_params_path)?;
 
         let game = Game::new(players, seed);
         let mut session = GameSession {
@@ -157,8 +213,8 @@ impl GameSession {
             current_actor: 0,
             possible_actions: vec![],
             log: vec![],
-            deck_human_path: deck_human_path.to_string(),
-            deck_ai_path: deck_ai_path.to_string(),
+            deck_human,
+            deck_ai,
             ai_params_path: ai_params_path.to_string(),
             seed,
         };
@@ -180,12 +236,9 @@ impl GameSession {
         if p.human_seat > 1 {
             return Err(format!("human_seat must be 0 or 1, got {}", p.human_seat));
         }
-        let deck_human =
-            Deck::from_file(&p.deck_human_path).map_err(|e| format!("deck_human: {e}"))?;
-        let deck_ai = Deck::from_file(&p.deck_ai_path).map_err(|e| format!("deck_ai: {e}"))?;
         let players = build_players(
-            deck_human,
-            deck_ai,
+            &p.deck_human,
+            &p.deck_ai,
             p.human_seat,
             p.ai_depth,
             &p.ai_params_path,
@@ -199,8 +252,8 @@ impl GameSession {
             current_actor: 0,
             possible_actions: vec![],
             log: p.log,
-            deck_human_path: p.deck_human_path,
-            deck_ai_path: p.deck_ai_path,
+            deck_human: p.deck_human,
+            deck_ai: p.deck_ai,
             ai_params_path: p.ai_params_path,
             seed: p.seed,
         };
@@ -211,8 +264,8 @@ impl GameSession {
     /// Snapshot of everything needed to resume this session later via `from_persisted`.
     fn to_persisted(&self) -> PersistedSession {
         PersistedSession {
-            deck_human_path: self.deck_human_path.clone(),
-            deck_ai_path: self.deck_ai_path.clone(),
+            deck_human: self.deck_human.clone(),
+            deck_ai: self.deck_ai.clone(),
             human_seat: self.human_seat,
             ai_depth: self.ai_depth,
             ai_params_path: self.ai_params_path.clone(),
@@ -315,8 +368,8 @@ impl GameSession {
 /// instead of trusting a second, potentially stale copy.
 #[derive(Serialize, Deserialize)]
 struct PersistedSession {
-    deck_human_path: String,
-    deck_ai_path: String,
+    deck_human: DeckSource,
+    deck_ai: DeckSource,
     human_seat: usize,
     ai_depth: usize,
     ai_params_path: String,

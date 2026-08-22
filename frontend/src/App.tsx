@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { createGame, submitAction } from "./api";
-import type { GameView } from "./types";
+import type { DeckChoice, GameView } from "./types";
 import { DeckSelect } from "./components/DeckSelect";
 import { Board } from "./components/Board";
 import { ActionPicker } from "./components/ActionPicker";
@@ -20,7 +20,12 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [showLog, setShowLog] = useState(false);
 
-  async function handleStart(deckHuman: string, deckAi: string, humanSeat: number, aiDepth: number) {
+  async function handleStart(
+    deckHuman: DeckChoice,
+    deckAi: DeckChoice,
+    humanSeat: number,
+    aiDepth: number,
+  ) {
     setBusy(true);
     setError(null);
     try {

@@ -1,33 +1,92 @@
 import { useEffect, useState } from "react";
 import { listDecks } from "../api";
-import type { DeckInfo } from "../types";
+import type { DeckChoice, DeckInfo } from "../types";
+import { DeckBuilder } from "./DeckBuilder";
 import "./DeckSelect.css";
+
+/** One "Your deck"/"AI's deck" picker: a dropdown of curated presets, or -- once built -- a
+ * summary of a custom deck with Edit/"use a preset instead" controls. */
+function DeckPicker({
+  label,
+  decks,
+  choice,
+  onPickPreset,
+  onOpenBuilder,
+  onClearCustom,
+}: {
+  label: string;
+  decks: DeckInfo[];
+  choice: DeckChoice;
+  onPickPreset: (path: string) => void;
+  onOpenBuilder: () => void;
+  onClearCustom: () => void;
+}) {
+  if ("list" in choice) {
+    return (
+      <div className="deck-select-field">
+        {label}
+        <div className="deck-select-custom-summary">
+          <span>Custom deck ({choice.summary.card_count} cards)</span>
+          <button type="button" onClick={onOpenBuilder}>
+            Edit
+          </button>
+          <button type="button" onClick={onClearCustom}>
+            Use a preset instead
+          </button>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="deck-select-field">
+      {label}
+      <select value={choice.path} onChange={(e) => onPickPreset(e.target.value)}>
+        {decks.map((d) => (
+          <option key={d.path} value={d.path}>
+            {d.label}
+          </option>
+        ))}
+      </select>
+      <button type="button" className="deck-select-build-link" onClick={onOpenBuilder}>
+        Build a custom deck instead
+      </button>
+    </div>
+  );
+}
 
 export function DeckSelect({
   onStart,
   loading,
   error,
 }: {
-  onStart: (deckHuman: string, deckAi: string, humanSeat: number, aiDepth: number) => void;
+  onStart: (deckHuman: DeckChoice, deckAi: DeckChoice, humanSeat: number, aiDepth: number) => void;
   loading: boolean;
   error: string | null;
 }) {
   const [decks, setDecks] = useState<DeckInfo[] | null>(null);
   const [decksError, setDecksError] = useState<string | null>(null);
-  const [deckHuman, setDeckHuman] = useState("");
-  const [deckAi, setDeckAi] = useState("");
+  const [deckHuman, setDeckHuman] = useState<DeckChoice | null>(null);
+  const [deckAi, setDeckAi] = useState<DeckChoice | null>(null);
   const [humanSeat, setHumanSeat] = useState(0);
   const [aiDepth, setAiDepth] = useState(2);
+  const [building, setBuilding] = useState<"human" | "ai" | null>(null);
 
   useEffect(() => {
     listDecks()
       .then((d) => {
         setDecks(d);
-        setDeckHuman(d[0]?.path ?? "");
-        setDeckAi(d[1]?.path ?? d[0]?.path ?? "");
+        setDeckHuman({ path: d[0]?.path ?? "" });
+        setDeckAi({ path: d[1]?.path ?? d[0]?.path ?? "" });
       })
       .catch((e) => setDecksError(e instanceof Error ? e.message : String(e)));
   }, []);
+
+  const canStart =
+    decks &&
+    deckHuman &&
+    deckAi &&
+    ("list" in deckHuman || deckHuman.path) &&
+    ("list" in deckAi || deckAi.path);
 
   return (
     <div className="deck-select">
@@ -39,29 +98,25 @@ export function DeckSelect({
 
       {decksError && <div className="deck-select-error">Failed to load decks: {decksError}</div>}
 
-      {decks && (
+      {decks && deckHuman && deckAi && (
         <>
-          <label className="deck-select-field">
-            Your deck
-            <select value={deckHuman} onChange={(e) => setDeckHuman(e.target.value)}>
-              {decks.map((d) => (
-                <option key={d.path} value={d.path}>
-                  {d.label}
-                </option>
-              ))}
-            </select>
-          </label>
+          <DeckPicker
+            label="Your deck"
+            decks={decks}
+            choice={deckHuman}
+            onPickPreset={(path) => setDeckHuman({ path })}
+            onOpenBuilder={() => setBuilding("human")}
+            onClearCustom={() => setDeckHuman({ path: decks[0]?.path ?? "" })}
+          />
 
-          <label className="deck-select-field">
-            AI's deck
-            <select value={deckAi} onChange={(e) => setDeckAi(e.target.value)}>
-              {decks.map((d) => (
-                <option key={d.path} value={d.path}>
-                  {d.label}
-                </option>
-              ))}
-            </select>
-          </label>
+          <DeckPicker
+            label="AI's deck"
+            decks={decks}
+            choice={deckAi}
+            onPickPreset={(path) => setDeckAi({ path })}
+            onOpenBuilder={() => setBuilding("ai")}
+            onClearCustom={() => setDeckAi({ path: decks[1]?.path ?? decks[0]?.path ?? "" })}
+          />
 
           <label className="deck-select-field">
             Go first?
@@ -85,11 +140,31 @@ export function DeckSelect({
 
       <button
         className="deck-select-start"
-        disabled={loading || !deckHuman || !deckAi}
-        onClick={() => onStart(deckHuman, deckAi, humanSeat, aiDepth)}
+        disabled={loading || !canStart}
+        onClick={() => canStart && onStart(deckHuman!, deckAi!, humanSeat, aiDepth)}
       >
         {loading ? "Starting..." : decks ? "Start game" : "Loading decks..."}
       </button>
+
+      {building && (
+        <DeckBuilder
+          initialList={
+            building === "human"
+              ? deckHuman && "list" in deckHuman
+                ? deckHuman.list
+                : undefined
+              : deckAi && "list" in deckAi
+                ? deckAi.list
+                : undefined
+          }
+          onCancel={() => setBuilding(null)}
+          onSave={(list, summary) => {
+            if (building === "human") setDeckHuman({ list, summary });
+            else setDeckAi({ list, summary });
+            setBuilding(null);
+          }}
+        />
+      )}
     </div>
   );
 }
