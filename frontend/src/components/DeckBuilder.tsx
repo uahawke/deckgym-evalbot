@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { listCards, validateDeck } from "../api";
 import type { Card, DeckSummary, EnergyType } from "../types";
-import { cardName } from "../types";
+import { cardId, cardName } from "../types";
 import { CardView, EnergyPip } from "./CardView";
 import "./DeckBuilder.css";
 
@@ -33,10 +33,6 @@ const ENERGY_TYPES: EnergyType[] = [
 const SELECTABLE_ENERGY_TYPES: EnergyType[] = ENERGY_TYPES.filter(
   (t) => t !== "Dragon" && t !== "Colorless",
 );
-
-function cardId(card: Card): string {
-  return "Pokemon" in card ? card.Pokemon.id : card.Trainer.id;
-}
 
 /** Parses a saved decklist (the "<count> <card id>" text format) back into per-id counts, so
  * re-opening the builder to edit a previously-built deck starts from where it left off. */

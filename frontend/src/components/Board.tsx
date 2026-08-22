@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { ActionView, Card, GameView, PlayedCard } from "../types";
+import { cardId } from "../types";
 import { CardView, EnergyPip } from "./CardView";
 import { PlayedCardView } from "./PlayedCardView";
 import "./Board.css";
@@ -149,12 +150,11 @@ export function Board({
         <DiscardPile label="Discard" cards={myDiscard} />
         <div className="my-hand">
           {state.my_hand.map((card, i) => {
-            const id = "Pokemon" in card ? card.Pokemon.id : card.Trainer.id;
             return (
               <CardView
                 key={i}
                 card={card}
-                actions={handActions(id)}
+                actions={handActions(cardId(card))}
                 onSelectAction={onSelectAction}
                 actionsDisabled={actionsDisabled}
               />

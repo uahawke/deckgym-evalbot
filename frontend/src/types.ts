@@ -50,6 +50,19 @@ export function cardName(card: Card): string {
   return "Pokemon" in card ? card.Pokemon.name : card.Trainer.name;
 }
 
+export function cardId(card: Card): string {
+  return "Pokemon" in card ? card.Pokemon.id : card.Trainer.id;
+}
+
+/** Card art, hotlinked from Limitless TCG (pocket.limitlesstcg.com) -- this project's own card
+ * ids already follow their `<SET> <NUMBER>` scheme (e.g. "A1 001", "P-A 002", "A1a 065"), which
+ * maps directly onto their image CDN path. Not something this project hosts or redistributes;
+ * the browser just requests it directly, same as embedding an image from any other site. */
+export function cardImageUrl(card: Card): string {
+  const [set, number] = cardId(card).split(" ");
+  return `https://limitlesstcg.nyc3.cdn.digitaloceanspaces.com/pocket/${set}/${set}_${number}_EN_SM.webp`;
+}
+
 export interface PlayedCard {
   card: Card;
   damage_counters: number;

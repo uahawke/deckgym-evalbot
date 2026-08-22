@@ -1,4 +1,6 @@
+import { useState } from "react";
 import type { ActionView, Card } from "../types";
+import { cardImageUrl } from "../types";
 import { energyColor } from "../energyColors";
 import "./CardView.css";
 
@@ -39,30 +41,15 @@ export function CardActions({
   );
 }
 
-/** A compact card face -- name, type/energy color accent, and key stats. Text-only by design:
- * there's no card art anywhere in this project's data, and sourcing official Pokemon TCG Pocket
- * art raises real licensing questions worth a deliberate decision, not a default. */
-export function CardView({
-  card,
-  small,
-  actions,
-  onSelectAction,
-  actionsDisabled,
-}: {
-  card: Card;
-  small?: boolean;
-  actions?: ActionView[];
-  onSelectAction?: (index: number) => void;
-  actionsDisabled?: boolean;
-}) {
-  const cardActions = actions && onSelectAction && (
-    <CardActions actions={actions} onSelect={onSelectAction} disabled={actionsDisabled} />
-  );
+/** The original text-only face -- name, type/energy color accent, and key stats. Used as a
+ * fallback when the real card art (hotlinked from Limitless TCG) fails to load, so a CDN hiccup
+ * or an id this project doesn't have art for degrades gracefully instead of showing nothing. */
+function TextCardFace({ card, small }: { card: Card; small?: boolean }) {
   if ("Pokemon" in card) {
     const p = card.Pokemon;
     return (
       <div
-        className={`card card-pokemon${small ? " card-small" : ""}`}
+        className={`card-text-face card-pokemon${small ? " card-small" : ""}`}
         style={{ borderColor: energyColor(p.energy_type) }}
       >
         <div className="card-header">
@@ -89,18 +76,55 @@ export function CardView({
             )}
           </div>
         )}
-        {cardActions}
       </div>
     );
   }
   const t = card.Trainer;
   return (
-    <div className={`card card-trainer${small ? " card-small" : ""}`}>
+    <div className={`card-text-face card-trainer${small ? " card-small" : ""}`}>
       <div className="card-header">
         <span className="card-name">{t.name}</span>
         <span className="card-type">{t.trainer_card_type}</span>
       </div>
       {!small && <div className="card-body card-effect">{t.effect}</div>}
+    </div>
+  );
+}
+
+/** A card face. Shows real Pokemon TCG Pocket art (hotlinked from Limitless TCG, not hosted or
+ * redistributed by this project) by default, falling back to a text-only stat panel if the image
+ * fails to load. */
+export function CardView({
+  card,
+  small,
+  actions,
+  onSelectAction,
+  actionsDisabled,
+}: {
+  card: Card;
+  small?: boolean;
+  actions?: ActionView[];
+  onSelectAction?: (index: number) => void;
+  actionsDisabled?: boolean;
+}) {
+  const [artFailed, setArtFailed] = useState(false);
+  const cardActions = actions && onSelectAction && (
+    <CardActions actions={actions} onSelect={onSelectAction} disabled={actionsDisabled} />
+  );
+
+  return (
+    <div className={`card${small ? " card-small" : ""}`}>
+      {artFailed ? (
+        <TextCardFace card={card} small={small} />
+      ) : (
+        <img
+          src={cardImageUrl(card)}
+          alt={"Pokemon" in card ? card.Pokemon.name : card.Trainer.name}
+          className="card-art"
+          loading="lazy"
+          onError={() => setArtFailed(true)}
+        />
+      )}
       {cardActions}
     </div>
   );
