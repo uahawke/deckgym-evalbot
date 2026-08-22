@@ -20,7 +20,6 @@ use axum::{
     Router,
 };
 use deckgym::web::{list_decks, DeckInfo, GameSession, GameView, SessionStore};
-use deckgym::Deck;
 use serde::Deserialize;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -79,10 +78,6 @@ async fn create_game(
     AxumState(store): AxumState<Arc<SessionStore>>,
     Json(req): Json<NewGameRequest>,
 ) -> Result<Json<NewGameResponse>, (StatusCode, String)> {
-    let deck_human = Deck::from_file(&req.deck_human)
-        .map_err(|e| (StatusCode::BAD_REQUEST, format!("deck_human: {e}")))?;
-    let deck_ai = Deck::from_file(&req.deck_ai)
-        .map_err(|e| (StatusCode::BAD_REQUEST, format!("deck_ai: {e}")))?;
     if req.ai_depth != DEFAULT_AI_DEPTH && req.ai_depth != HARD_AI_DEPTH {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -95,8 +90,8 @@ async fn create_game(
     let seed = req.seed.unwrap_or_else(rand::random::<u64>);
 
     let session = GameSession::new(
-        deck_human,
-        deck_ai,
+        &req.deck_human,
+        &req.deck_ai,
         req.human_seat,
         req.ai_depth,
         DEFAULT_AI_PARAMS,
@@ -137,7 +132,7 @@ async fn submit_action(
 async fn main() {
     env_logger::init();
 
-    let store = Arc::new(SessionStore::default());
+    let store = Arc::new(SessionStore::load());
 
     let app = Router::new()
         .route("/api/decks", get(get_decks))
