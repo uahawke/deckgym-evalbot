@@ -2,12 +2,16 @@ import { useEffect, useMemo, useState } from "react";
 import { listCards, validateDeck } from "../api";
 import type { Card, DeckSummary, EnergyType } from "../types";
 import { cardName } from "../types";
-import { CardView } from "./CardView";
+import { CardView, EnergyPip } from "./CardView";
 import "./DeckBuilder.css";
 
 const MAX_RESULTS = 60;
 const MAX_COPIES = 2;
 const DECK_SIZE = 20;
+/** Real Pokémon TCG Pocket caps a deck at 2 chosen Energy types; this engine doesn't enforce a
+ * limit (`Deck::is_valid` only checks the set is non-empty and every type is selectable), but the
+ * player-facing cap is a deliberate product choice, not an engine constraint. */
+const MAX_ENERGY_TYPES = 3;
 
 const ENERGY_TYPES: EnergyType[] = [
   "Grass",
@@ -21,6 +25,14 @@ const ENERGY_TYPES: EnergyType[] = [
   "Dragon",
   "Colorless",
 ];
+
+/** The types a deck's Energy Zone can actually be declared to generate -- excludes Dragon and
+ * Colorless (`EnergyType::is_selectable`), which are valid Pokémon types but not valid Energy
+ * Zone declarations; a Dragon- or Colorless-type Pokémon's attacks get paid for by whichever of
+ * *these* types the deck generates instead. */
+const SELECTABLE_ENERGY_TYPES: EnergyType[] = ENERGY_TYPES.filter(
+  (t) => t !== "Dragon" && t !== "Colorless",
+);
 
 function cardId(card: Card): string {
   return "Pokemon" in card ? card.Pokemon.id : card.Trainer.id;
@@ -39,6 +51,20 @@ function parseCounts(list: string): Record<string, number> {
     if (Number.isFinite(count) && count > 0) counts[id] = count;
   }
   return counts;
+}
+
+/** Parses a saved decklist's `Energy:` line back into the picked types, so re-opening the
+ * builder to edit a deck starts from the same selection rather than an empty one. */
+function parseEnergyLine(list: string): EnergyType[] {
+  const line = list.split("\n").find((l) => l.trim().startsWith("Energy:"));
+  if (!line) return [];
+  const named = line
+    .trim()
+    .slice("Energy:".length)
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return named.filter((t): t is EnergyType => (ENERGY_TYPES as string[]).includes(t));
 }
 
 /** A visual deck builder: search/filter the full card database, click to add up to 2 copies of
@@ -60,6 +86,9 @@ export function DeckBuilder({
   const [energyFilter, setEnergyFilter] = useState<EnergyType | "All">("All");
   const [counts, setCounts] = useState<Record<string, number>>(() =>
     initialList ? parseCounts(initialList) : {},
+  );
+  const [energyTypes, setEnergyTypes] = useState<EnergyType[]>(() =>
+    initialList ? parseEnergyLine(initialList) : [],
   );
   const [validation, setValidation] = useState<DeckSummary | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
@@ -107,26 +136,35 @@ export function DeckBuilder({
     setValidationError(null);
   }
 
-  /** Explicit `Energy:` line, computed from the selected Pokémon's own types -- letting the
-   * server derive it (its fallback for a decklist with no such line) would include every type
-   * verbatim, and a Colorless- or Dragon-type Pokémon's own type isn't a type the Energy Zone can
-   * actually generate (`EnergyType::is_selectable`); a deck with any such Pokémon would otherwise
-   * fail legality even though real decks built around them declare *other* energy types instead. */
-  function energyLine(): string {
+  /** Pokémon types actually present in the deck so far (excluding Colorless/Dragon, which aren't
+   * valid Energy Zone declarations) -- shown as a hint, not applied automatically, since energy
+   * types are now the player's own choice. */
+  const suggestedTypes = useMemo(() => {
     const types = new Set<EnergyType>();
     for (const id of Object.keys(counts)) {
       const card = cardsById.get(id);
       const type = card && "Pokemon" in card ? card.Pokemon.energy_type : null;
       if (type && type !== "Colorless" && type !== "Dragon") types.add(type);
     }
-    return types.size > 0 ? `Energy: ${[...types].join(",")}\n` : "";
+    return [...types];
+  }, [counts, cardsById]);
+
+  function toggleEnergy(t: EnergyType) {
+    setEnergyTypes((prev) => {
+      if (prev.includes(t)) return prev.filter((x) => x !== t);
+      if (prev.length >= MAX_ENERGY_TYPES) return prev;
+      return [...prev, t];
+    });
+    setValidation(null);
+    setValidationError(null);
   }
 
   function buildListText(): string {
     const cardLines = Object.entries(counts)
       .map(([id, count]) => `${count} ${id}`)
       .join("\n");
-    return energyLine() + cardLines;
+    const energyPrefix = energyTypes.length > 0 ? `Energy: ${energyTypes.join(",")}\n` : "";
+    return energyPrefix + cardLines;
   }
 
   async function check(onValid?: (list: string, summary: DeckSummary) => void) {
@@ -244,6 +282,33 @@ export function DeckBuilder({
               })}
             </div>
 
+            <div className="deck-builder-energy">
+              <div className="deck-builder-energy-title">
+                Energy types ({energyTypes.length}/{MAX_ENERGY_TYPES})
+              </div>
+              <div className="deck-builder-energy-options">
+                {SELECTABLE_ENERGY_TYPES.map((t) => {
+                  const selected = energyTypes.includes(t);
+                  return (
+                    <button
+                      key={t}
+                      type="button"
+                      className={`deck-builder-energy-pip${selected ? " selected" : ""}`}
+                      onClick={() => toggleEnergy(t)}
+                      disabled={!selected && energyTypes.length >= MAX_ENERGY_TYPES}
+                    >
+                      <EnergyPip type={t} /> {t}
+                    </button>
+                  );
+                })}
+              </div>
+              {suggestedTypes.length > 0 && (
+                <div className="deck-builder-energy-hint">
+                  Your Pokémon use: {suggestedTypes.join(", ")}
+                </div>
+              )}
+            </div>
+
             {validation && (
               <div className="deck-builder-valid">
                 Legal deck -- energy: {validation.energy_types.join(", ")}
@@ -252,14 +317,17 @@ export function DeckBuilder({
             {validationError && <div className="deck-builder-error">{validationError}</div>}
 
             <div className="deck-builder-actions">
-              <button onClick={() => check()} disabled={busy || totalCount === 0}>
+              <button
+                onClick={() => check()}
+                disabled={busy || totalCount === 0 || energyTypes.length === 0}
+              >
                 Check legality
               </button>
               <button onClick={onCancel}>Cancel</button>
               <button
                 className="deck-builder-save"
                 onClick={() => check(onSave)}
-                disabled={busy || totalCount === 0}
+                disabled={busy || totalCount === 0 || energyTypes.length === 0}
               >
                 {busy ? "Checking..." : "Save deck"}
               </button>

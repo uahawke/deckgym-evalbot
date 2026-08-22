@@ -183,6 +183,54 @@
   flex-shrink: 0;
 }
 
+.deck-builder-energy {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-top: 1px solid #333;
+  padding-top: 8px;
+}
+
+.deck-builder-energy-title {
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.deck-builder-energy-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.deck-builder-energy-pip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: #2c2c2c;
+  color: #ccc;
+  border: 1px solid #555;
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.deck-builder-energy-pip.selected {
+  background: #37474f;
+  border-color: #90caf9;
+  color: #eee;
+}
+
+.deck-builder-energy-pip:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.deck-builder-energy-hint {
+  color: #888;
+  font-size: 11px;
+}
+
 .deck-builder-valid {
   color: #66bb6a;
   font-size: 12px;
