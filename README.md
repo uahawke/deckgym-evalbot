@@ -18,6 +18,9 @@ AI player strength.
   readiness)
 - **`.claude/skills/tune-bot/`** — methodology notes, including the
   measurement pitfalls that produce confidently wrong results
+- **`python/summarize_game_logs.py`** — reports deck frequency/win-rate from the web
+  server's `game_logs/` archive, to help decide which player-submitted decks are worth
+  promoting into `decks/train`/`example_decks/` for a future tuning gauntlet
 
 ## Usage
 
@@ -36,6 +39,9 @@ python -u python/tune_value_function.py \
   --opponents e1 --opponent-params tuned_params_v6.json \
   --init-params tuned_params_v6.json \
   --out tuned_params_v7.json
+
+# Review which decks players actually used against the web opponent
+python3 python/summarize_game_logs.py
 ```
 
 ## Results
