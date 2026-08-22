@@ -16,8 +16,18 @@
   color: #ccc;
 }
 
-.app-restart {
+.app-log-toggle {
   margin-left: auto;
+  background: transparent;
+  color: #ccc;
+  border: 1px solid #555;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.app-restart {
   background: transparent;
   color: #90caf9;
   border: 1px solid #555;

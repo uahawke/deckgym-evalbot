@@ -14,15 +14,6 @@
   flex-wrap: wrap;
 }
 
-.action-group-title {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: #888;
-  width: 130px;
-  flex-shrink: 0;
-}
-
 .action-group-buttons {
   display: flex;
   gap: 6px;
@@ -47,4 +38,15 @@
 .action-button:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+.action-button-end-turn {
+  background: #2e7d32;
+  border-color: #43a047;
+  font-weight: 600;
+}
+
+.action-button-end-turn:hover:not(:disabled) {
+  background: #388e3c;
+  border-color: #66bb6a;
 }

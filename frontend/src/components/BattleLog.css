@@ -1,0 +1,49 @@
+.battle-log {
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 10px 14px;
+  background: #161616;
+  border-bottom: 1px solid #333;
+  font-size: 12px;
+}
+
+.battle-log-empty {
+  color: #777;
+}
+
+.battle-log-turn-header {
+  color: #888;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 8px 0 4px;
+}
+
+.battle-log-turn-header:first-child {
+  margin-top: 0;
+}
+
+.battle-log-entry {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 2px 0;
+}
+
+.battle-log-actor {
+  flex-shrink: 0;
+  width: 30px;
+  font-weight: 700;
+}
+
+.battle-log-you {
+  color: #90caf9;
+}
+
+.battle-log-opponent {
+  color: #ef9a9a;
+}
+
+.battle-log-label {
+  color: #ddd;
+}

@@ -1,4 +1,4 @@
-import type { Card } from "../types";
+import type { ActionView, Card } from "../types";
 import { energyColor } from "../energyColors";
 import "./CardView.css";
 
@@ -10,10 +10,54 @@ export function EnergyPip({ type }: { type: string }) {
   );
 }
 
+/** Buttons for whichever actions the caller has already matched to this card (by
+ * `ActionView.hand_card_id` for hand cards, `in_play_idx` for played ones) -- so the player acts
+ * directly on the card instead of hunting through a separate list. */
+export function CardActions({
+  actions,
+  onSelect,
+  disabled,
+}: {
+  actions: ActionView[];
+  onSelect: (index: number) => void;
+  disabled?: boolean;
+}) {
+  if (actions.length === 0) return null;
+  return (
+    <div className="card-actions">
+      {actions.map((a) => (
+        <button
+          key={a.index}
+          disabled={disabled}
+          onClick={() => onSelect(a.index)}
+          className="card-action-button"
+        >
+          {a.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 /** A compact card face -- name, type/energy color accent, and key stats. Text-only by design:
  * there's no card art anywhere in this project's data, and sourcing official Pokemon TCG Pocket
  * art raises real licensing questions worth a deliberate decision, not a default. */
-export function CardView({ card, small }: { card: Card; small?: boolean }) {
+export function CardView({
+  card,
+  small,
+  actions,
+  onSelectAction,
+  actionsDisabled,
+}: {
+  card: Card;
+  small?: boolean;
+  actions?: ActionView[];
+  onSelectAction?: (index: number) => void;
+  actionsDisabled?: boolean;
+}) {
+  const cardActions = actions && onSelectAction && (
+    <CardActions actions={actions} onSelect={onSelectAction} disabled={actionsDisabled} />
+  );
   if ("Pokemon" in card) {
     const p = card.Pokemon;
     return (
@@ -45,6 +89,7 @@ export function CardView({ card, small }: { card: Card; small?: boolean }) {
             )}
           </div>
         )}
+        {cardActions}
       </div>
     );
   }
@@ -56,6 +101,7 @@ export function CardView({ card, small }: { card: Card; small?: boolean }) {
         <span className="card-type">{t.trainer_card_type}</span>
       </div>
       {!small && <div className="card-body card-effect">{t.effect}</div>}
+      {cardActions}
     </div>
   );
 }

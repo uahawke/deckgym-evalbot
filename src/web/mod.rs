@@ -14,7 +14,7 @@ use std::fs;
 use std::sync::Mutex;
 use uuid::Uuid;
 
-use crate::actions::Action;
+use crate::actions::{Action, SimpleAction};
 use crate::models::{Card, EnergyType, PlayedCard};
 use crate::players::{ExpectiMiniMaxPlayer, HumanPlayer, ValueFunctionParams};
 use crate::state::GameOutcome;
@@ -121,6 +121,8 @@ pub struct GameSession {
     ai_depth: usize,
     current_actor: usize,
     possible_actions: Vec<Action>,
+    /// Chronological record of applied actions (both players'), for the frontend's battle log.
+    log: Vec<LogEntry>,
     // The rest of these fields exist only so `to_persisted` can rebuild an equivalent session
     // (players, value function) after a server restart -- see `PersistedSession`.
     deck_human_path: String,
@@ -154,6 +156,7 @@ impl GameSession {
             ai_depth,
             current_actor: 0,
             possible_actions: vec![],
+            log: vec![],
             deck_human_path: deck_human_path.to_string(),
             deck_ai_path: deck_ai_path.to_string(),
             ai_params_path: ai_params_path.to_string(),
@@ -195,6 +198,7 @@ impl GameSession {
             ai_depth: p.ai_depth,
             current_actor: 0,
             possible_actions: vec![],
+            log: p.log,
             deck_human_path: p.deck_human_path,
             deck_ai_path: p.deck_ai_path,
             ai_params_path: p.ai_params_path,
@@ -214,6 +218,7 @@ impl GameSession {
             ai_params_path: self.ai_params_path.clone(),
             seed: self.seed,
             state: self.game.get_state_clone(),
+            log: self.log.clone(),
         }
     }
 
@@ -231,7 +236,9 @@ impl GameSession {
             if actor == self.human_seat {
                 break;
             }
-            self.game.play_tick();
+            let turn = self.game.get_state_clone().turn_count;
+            let action = self.game.play_tick();
+            self.log_action(turn, actor, &action);
         }
     }
 
@@ -249,9 +256,25 @@ impl GameSession {
             .get(action_index)
             .ok_or_else(|| format!("invalid action index {action_index}"))?
             .clone();
+        let turn = self.game.get_state_clone().turn_count;
+        self.log_action(turn, self.current_actor, &action);
         self.game.apply_action(&action);
         self.advance();
         Ok(())
+    }
+
+    /// Records an action to the battle log, skipping the ones that are noise rather than
+    /// something a player would want to review (`Noop` is an internal "no" answer to a
+    /// sub-decision; `DrawCard` happens every single turn and isn't "a card played").
+    fn log_action(&mut self, turn: u8, actor: usize, action: &Action) {
+        if matches!(action.action, SimpleAction::Noop | SimpleAction::DrawCard { .. }) {
+            return;
+        }
+        self.log.push(LogEntry {
+            turn,
+            actor,
+            label: action.action.describe(),
+        });
     }
 
     pub fn view(&self) -> GameView {
@@ -269,13 +292,19 @@ impl GameSession {
                 .possible_actions
                 .iter()
                 .enumerate()
-                .map(|(index, action)| ActionView {
-                    index,
-                    actor: action.actor,
-                    label: action.action.describe(),
+                .map(|(index, action)| {
+                    let (hand_card_id, in_play_idx) = action.action.target_hint();
+                    ActionView {
+                        index,
+                        actor: action.actor,
+                        label: action.action.describe(),
+                        hand_card_id,
+                        in_play_idx,
+                    }
                 })
                 .collect(),
             state: PlayerStateView::from_state(&state, self.human_seat),
+            log: self.log.clone(),
         }
     }
 }
@@ -293,6 +322,8 @@ struct PersistedSession {
     ai_params_path: String,
     seed: u64,
     state: State,
+    #[serde(default)]
+    log: Vec<LogEntry>,
 }
 
 /// What the frontend gets back after starting a game or submitting an action.
@@ -308,6 +339,16 @@ pub struct GameView {
     pub points: [u8; 2],
     pub possible_actions: Vec<ActionView>,
     pub state: PlayerStateView,
+    /// Chronological record of every action applied so far (both players'), for a battle-log UI.
+    pub log: Vec<LogEntry>,
+}
+
+/// One applied action, as shown in the battle log.
+#[derive(Serialize, Deserialize, Clone)]
+pub struct LogEntry {
+    pub turn: u8,
+    pub actor: usize,
+    pub label: String,
 }
 
 #[derive(Serialize)]
@@ -315,6 +356,11 @@ pub struct ActionView {
     pub index: usize,
     pub actor: usize,
     pub label: String,
+    /// If set, this action belongs on the hand card with this id (see `SimpleAction::target_hint`).
+    pub hand_card_id: Option<String>,
+    /// If set, this action belongs on the acting player's own in-play slot at this index
+    /// (0 = active, 1..4 = bench).
+    pub in_play_idx: Option<usize>,
 }
 
 /// `State` filtered to what `viewer` is actually allowed to see. The raw `State` holds both
@@ -331,10 +377,8 @@ pub struct PlayerStateView {
     pub current_player: usize,
     /// The viewer's own energy zone, in full.
     pub my_energy_zone: EnergyZoneView,
-    /// The opponent's energy zone. `next` is deliberately omitted here -- unconfirmed whether
-    /// TCG Pocket shows an opponent's upcoming energy type or only your own; defaulting to
-    /// hidden (the safe direction) until that's checked against the real game's rules.
-    pub opponent_energy_current: Option<EnergyType>,
+    /// The opponent's energy zone, in full -- confirmed public in TCG Pocket, same as your own.
+    pub opponent_energy_zone: EnergyZoneView,
     /// The viewer's own hand, in full.
     pub my_hand: Vec<Card>,
     pub opponent_hand_size: usize,
@@ -368,7 +412,10 @@ impl PlayerStateView {
                 current: state.energy_zone[viewer].current,
                 next: state.energy_zone[viewer].next,
             },
-            opponent_energy_current: state.energy_zone[opponent].current,
+            opponent_energy_zone: EnergyZoneView {
+                current: state.energy_zone[opponent].current,
+                next: state.energy_zone[opponent].next,
+            },
             my_hand: state.hands[viewer].clone(),
             opponent_hand_size: state.hands[opponent].len(),
             deck_sizes: [

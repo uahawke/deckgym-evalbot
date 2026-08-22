@@ -89,7 +89,7 @@ export interface PlayerStateView {
   turn_count: number;
   current_player: number;
   my_energy_zone: EnergyZoneView;
-  opponent_energy_current: EnergyType | null;
+  opponent_energy_zone: EnergyZoneView;
   my_hand: Card[];
   opponent_hand_size: number;
   deck_sizes: [number, number];
@@ -110,6 +110,14 @@ export interface ActionView {
   index: number;
   actor: number;
   label: string;
+  hand_card_id: string | null;
+  in_play_idx: number | null;
+}
+
+export interface LogEntry {
+  turn: number;
+  actor: number;
+  label: string;
 }
 
 export interface GameView {
@@ -123,6 +131,7 @@ export interface GameView {
   points: [number, number];
   possible_actions: ActionView[];
   state: PlayerStateView;
+  log: LogEntry[];
 }
 
 export interface NewGameResponse extends GameView {

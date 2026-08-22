@@ -100,3 +100,33 @@
 .card-trainer {
   border-color: #90caf9;
 }
+
+.card-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid #3a3a3a;
+}
+
+.card-action-button {
+  background: #2c2c2c;
+  color: #eee;
+  border: 1px solid #555;
+  border-radius: 5px;
+  padding: 4px 6px;
+  font-size: 11px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.card-action-button:hover:not(:disabled) {
+  background: #3a3a3a;
+  border-color: #777;
+}
+
+.card-action-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

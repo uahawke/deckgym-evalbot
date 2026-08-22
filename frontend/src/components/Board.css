@@ -69,3 +69,36 @@
   font-size: 12px;
   color: #90caf9;
 }
+
+.discard-pile {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.discard-toggle {
+  align-self: flex-start;
+  background: transparent;
+  color: #ccc;
+  border: 1px solid #444;
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.discard-toggle:hover:not(:disabled) {
+  border-color: #777;
+  color: #eee;
+}
+
+.discard-toggle:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.discard-cards {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}

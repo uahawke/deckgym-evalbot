@@ -1,21 +1,10 @@
 import type { ActionView } from "../types";
 import "./ActionPicker.css";
 
-// Rough grouping by label prefix, mirroring tui::app::action_priority_for_tui's categories.
-// The label comes from SimpleAction::describe() on the Rust side -- this is a convenience
-// grouping, not a structured action type, so it's necessarily a bit heuristic.
-const GROUPS: { title: string; test: (label: string) => boolean }[] = [
-  { title: "Place / Evolve", test: (l) => l.startsWith("Place") || l.startsWith("Evolve") },
-  { title: "Play", test: (l) => l.startsWith("Play") },
-  {
-    title: "Attach energy / tool",
-    test: (l) => l.startsWith("Attach"),
-  },
-  { title: "Attack", test: (l) => l.startsWith("Attack") },
-  { title: "Retreat", test: (l) => l.startsWith("Retreat") },
-  { title: "End turn", test: (l) => l.startsWith("End turn") },
-];
-
+/** Actions with nowhere to live on a card -- `Board` renders the rest (place/evolve/play/attach/
+ * attack/retreat/etc.) directly on their matching hand or in-play card via `ActionView.hand_card_id`
+ * / `in_play_idx`. What's left here is End Turn, Draw Card, and a handful of effects that either
+ * span multiple cards or can target the opponent's side (see `SimpleAction::target_hint`). */
 export function ActionPicker({
   actions,
   onSelect,
@@ -25,20 +14,16 @@ export function ActionPicker({
   onSelect: (index: number) => void;
   disabled: boolean;
 }) {
-  const grouped = GROUPS.map((g) => ({
-    title: g.title,
-    actions: actions.filter((a) => g.test(a.label)),
-  })).filter((g) => g.actions.length > 0);
-  const grouped_labels = new Set(grouped.flatMap((g) => g.actions.map((a) => a.index)));
-  const other = actions.filter((a) => !grouped_labels.has(a.index));
+  if (actions.length === 0) return null;
+  const endTurn = actions.filter((a) => a.label === "End turn");
+  const other = actions.filter((a) => a.label !== "End turn");
 
   return (
     <div className="action-picker">
-      {grouped.map((g) => (
-        <div key={g.title} className="action-group">
-          <div className="action-group-title">{g.title}</div>
+      {other.length > 0 && (
+        <div className="action-group">
           <div className="action-group-buttons">
-            {g.actions.map((a) => (
+            {other.map((a) => (
               <button
                 key={a.index}
                 disabled={disabled}
@@ -50,17 +35,16 @@ export function ActionPicker({
             ))}
           </div>
         </div>
-      ))}
-      {other.length > 0 && (
+      )}
+      {endTurn.length > 0 && (
         <div className="action-group">
-          <div className="action-group-title">Other</div>
           <div className="action-group-buttons">
-            {other.map((a) => (
+            {endTurn.map((a) => (
               <button
                 key={a.index}
                 disabled={disabled}
                 onClick={() => onSelect(a.index)}
-                className="action-button"
+                className="action-button action-button-end-turn"
               >
                 {a.label}
               </button>

@@ -1,15 +1,21 @@
-import type { PlayedCard } from "../types";
+import type { ActionView, PlayedCard } from "../types";
 import { cardName, maxHp, remainingHp } from "../types";
-import { EnergyPip } from "./CardView";
+import { CardActions, EnergyPip } from "./CardView";
 import { energyColor } from "../energyColors";
 import "./PlayedCardView.css";
 
 export function PlayedCardView({
   played,
   isActive,
+  actions,
+  onSelectAction,
+  actionsDisabled,
 }: {
   played: PlayedCard | null;
   isActive: boolean;
+  actions?: ActionView[];
+  onSelectAction?: (index: number) => void;
+  actionsDisabled?: boolean;
 }) {
   if (!played) {
     return <div className={`slot slot-empty ${isActive ? "slot-active" : "slot-bench"}`}>—</div>;
@@ -55,6 +61,9 @@ export function PlayedCardView({
           🔧{" "}
           {"Trainer" in played.attached_tool ? played.attached_tool.Trainer.name : "Tool"}
         </div>
+      )}
+      {actions && onSelectAction && (
+        <CardActions actions={actions} onSelect={onSelectAction} disabled={actionsDisabled} />
       )}
     </div>
   );

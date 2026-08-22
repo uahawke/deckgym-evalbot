@@ -372,6 +372,56 @@ impl SimpleAction {
             SimpleAction::Noop => "Pass".to_string(),
         }
     }
+
+    /// Where this action's button belongs in a card-oriented UI (the web frontend), as a
+    /// `(hand_card_id, in_play_idx)` hint: at most one is set, meaning "render this action on the
+    /// hand card with this id" or "render it on the acting player's in-play slot at this index"
+    /// respectively. `(None, None)` means there's no single natural card for it (`EndTurn`, a
+    /// choice spanning multiple cards, or an effect that can target the *opponent's* side, which
+    /// this deliberately excludes since `in_play_idx` alone can't say whose board it's on).
+    ///
+    /// Purely a UI placement hint -- `describe()` remains the source of truth for what the action
+    /// actually does, since a hint here is necessarily approximate (e.g. two duplicate hand cards
+    /// share an id and so share whatever buttons match that id).
+    pub fn target_hint(&self) -> (Option<String>, Option<usize>) {
+        match self {
+            SimpleAction::Play { trainer_card } => (Some(trainer_card.id.clone()), None),
+            SimpleAction::Place(card, _) => (Some(card.get_id()), None),
+            SimpleAction::Evolve { in_play_idx, .. } => (None, Some(*in_play_idx)),
+            SimpleAction::UseAbility { in_play_idx } => (None, Some(*in_play_idx)),
+            SimpleAction::Attack(_) => (None, Some(0)), // only the active Pokemon can attack
+            SimpleAction::Retreat(idx) => (None, Some(*idx)),
+            SimpleAction::Attach { attachments, .. } => (
+                None,
+                attachments.first().map(|(_, _, idx)| *idx),
+            ),
+            SimpleAction::AttachTool { in_play_idx, .. } => (None, Some(*in_play_idx)),
+            SimpleAction::Heal { in_play_idx, .. } => (None, Some(*in_play_idx)),
+            SimpleAction::HealAndDiscardEnergy { in_play_idx, .. } => (None, Some(*in_play_idx)),
+            SimpleAction::AttachFromDiscard { in_play_idx, .. } => (None, Some(*in_play_idx)),
+            SimpleAction::AttachTypedFromDiscard { in_play_idx, .. } => {
+                (None, Some(*in_play_idx))
+            }
+            SimpleAction::DiscardFossil { in_play_idx } => (None, Some(*in_play_idx)),
+            SimpleAction::DiscardOwnBenchedThenDamage { in_play_idx, .. } => {
+                (None, Some(*in_play_idx))
+            }
+            SimpleAction::ReturnPokemonToHand { in_play_idx } => (None, Some(*in_play_idx)),
+            SimpleAction::ShuffleInPlayPokemonIntoDeck { in_play_idx } => {
+                (None, Some(*in_play_idx))
+            }
+            SimpleAction::CommunicatePokemon { hand_pokemon } => {
+                (Some(hand_pokemon.get_id()), None)
+            }
+            SimpleAction::SwitchHandCardForRandomTool { hand_card } => {
+                (Some(hand_card.get_id()), None)
+            }
+            // Everything else either spans multiple cards (a Vec<Card> choice), can target the
+            // opponent's board (e.g. DiscardToolFromPokemon's `player` field), or has no card at
+            // all (EndTurn, DrawCard, UseStadium, Noop) -- left for the general action list.
+            _ => (None, None),
+        }
+    }
 }
 
 impl fmt::Display for SimpleAction {
